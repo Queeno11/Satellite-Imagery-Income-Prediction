@@ -21,7 +21,6 @@ path_logs = env["PATH_LOGS"]
 path_outputs = env["PATH_OUTPUTS"]
 # path_programas  = globales[7]
 
-
 import affine
 import geopandas as gpd
 import rasterio.features

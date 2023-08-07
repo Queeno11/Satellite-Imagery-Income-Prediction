@@ -79,6 +79,7 @@ def create_datasets(df, variable, kind, image_size, sample_size, small_sample=Fa
 
     from sklearn.model_selection import train_test_split
 
+    # FIXME: hacer set de test arbitrario
     # Train, validation and test split
     train, test = train_test_split(df, test_size=0.2, shuffle=True, random_state=825)
     test, val = train_test_split(test, test_size=0.5, shuffle=True, random_state=528)
@@ -88,28 +89,29 @@ def create_datasets(df, variable, kind, image_size, sample_size, small_sample=Fa
 
     ### dataframes to tf.data.Dataset
 
-    def img_file_to_tensor(file, label):
-        def _img_file_to_tensor(file, label):
-            # im = tf.image.decode_jpeg(tf.io.read_file(file), channels=4) # OLD: chequear si funca el nuevo
-            im = np.load(file)
-            im = np.moveaxis(im, 0, 2) # Move axis so the original [4, 512, 512] becames [512, 512, 4]
-            # im = tf.image.resize(im, [224, 224])
-            im = tf.cast(im, tf.uint8)
-            label = tf.cast(label, tf.float32)
-            return im, label
+    # def img_file_to_tensor(file, label):
+    #     def _img_file_to_tensor(file, label):
+    #         # im = tf.image.decode_jpeg(tf.io.read_file(file), channels=4) # OLD: chequear si funca el nuevo
+    #         im = np.load(file)
+    #         im = np.moveaxis(im, 0, 2) # Move axis so the original [4, 512, 512] becames [512, 512, 4]
+    #         # im = tf.image.resize(im, [224, 224])
+    #         im = tf.cast(im, tf.uint8)
+    #         label = tf.cast(label, tf.float32)
+    #         return im, label
 
-        return tf.py_function(
-            _img_file_to_tensor, [file, label], [tf.uint8, tf.float32]
-        )
+    #     return tf.py_function(
+    #         _img_file_to_tensor, [file, label], [tf.uint8, tf.float32]
+    #     )
 
     def process_image(file_path, label):
-
         img = np.load(file_path)
-        img = np.moveaxis(img, 0, 2) # Move axis so the original [4, 512, 512] becames [512, 512, 4]
-        img = tf.convert_to_tensor(img/255, dtype=tf.float32) 
+        img = np.moveaxis(
+            img, 0, 2
+        )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
+        img = tf.convert_to_tensor(img / 255, dtype=tf.float32)
         label = tf.cast(label, tf.float32)
 
-        return img , label 
+        return img, label
 
     # Create tf.data pipeline for each dataset
     datasets = []
@@ -118,7 +120,7 @@ def create_datasets(df, variable, kind, image_size, sample_size, small_sample=Fa
         # Get list of filenames and corresponding list of labels
         filenames = tf.constant(dataframe["image"].to_list())
         if kind == "reg":
-            labels = tf.constant(dataframe['var'].to_list())
+            labels = tf.constant(dataframe["var"].to_list())
         elif kind == "cla":
             labels = tf.one_hot(
                 (df["var"] - 1).to_list(), 10
@@ -126,8 +128,11 @@ def create_datasets(df, variable, kind, image_size, sample_size, small_sample=Fa
 
         # Create a dataset from the filenames and labels
         dataset = tf.data.Dataset.from_tensor_slices((filenames, labels))
-        dataset = dataset.map(lambda file, label: tf.numpy_function(
-            process_image, [file, label], (tf.float32, tf.float32)))  # Parse every image in the dataset using `map`
+        dataset = dataset.map(
+            lambda file, label: tf.numpy_function(
+                process_image, [file, label], (tf.float32, tf.float32)
+            )
+        )  # Parse every image in the dataset using `map`
         datasets += [dataset]
 
         # Store filenames for later use
@@ -141,7 +146,9 @@ def create_datasets(df, variable, kind, image_size, sample_size, small_sample=Fa
     data_augmentation = keras.Sequential(
         [
             layers.RandomFlip(
-                "horizontal_and_vertical", seed=825, input_shape=(image_size, image_size, 4)
+                "horizontal_and_vertical",
+                seed=825,
+                input_shape=(image_size, image_size, 4),
             ),
             layers.RandomRotation(0.3, fill_mode="reflect", seed=825),
             layers.RandomTranslation(0.3, 0.3, fill_mode="reflect", seed=825),
@@ -197,6 +204,7 @@ def get_callbacks(
     )
     # use tensorboard --logdir logs/scalars in your command line to startup tensorboard with the correct logs
 
+    # FIXME: Sacar esto
     early_stopping_callback = EarlyStopping(
         monitor="val_loss",
         min_delta=0,  # the training is terminated as soon as the performance measure gets worse from one epoch to the next
@@ -271,11 +279,11 @@ def run_model(
     model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
     history = model.fit(
         train_generator,
-        epochs=200,
+        epochs=50,
         validation_data=validation_generator,
         shuffle=True,
         callbacks=callbacks,
-        workers=8,  # adjust this according to the number of CPU cores of your machine
+        workers=2,  # adjust this according to the number of CPU cores of your machine
     )
 
     model.evaluate(
@@ -455,8 +463,8 @@ if __name__ == "__main__":
         # "icv2010_d": "cla",
     }
 
-    image_size=200
-    sample_size=1
+    image_size = 200
+    sample_size = 1
     # parser = argparse.ArgumentParser(description="Model setup")
     # parser.add_argument(
     #     "--model",
@@ -481,7 +489,7 @@ if __name__ == "__main__":
 
     # model = args.model
     # vars = [args.var]
-    
+
     model = "small_cnn"
     vars = ["pred_inc_mean"]
     if (vars == ["all"]) or (vars == [None]):
