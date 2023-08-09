@@ -3,7 +3,11 @@ from tensorflow import keras
 import tensorflow_addons as tfa
 
 from tensorflow.keras import layers, models, Model
-from tensorflow.python.keras.callbacks import TensorBoard, EarlyStopping, ModelCheckpoint
+from tensorflow.python.keras.callbacks import (
+    TensorBoard,
+    EarlyStopping,
+    ModelCheckpoint,
+)
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.applications import (
     MobileNetV2,
@@ -156,9 +160,15 @@ def small_cnn(image_size) -> Sequential:
     (https://www.pinecone.io/learn/batch-layer-normalization/)"""
 
     model = models.Sequential()
-    # model.add(layers.Resizing(128, 128, input_shape=(512, 512, 4)))
+    model.add(layers.Resizing(200, 200, input_shape=(image_size, image_size, 4)))
 
-    model.add(layers.Conv2D(32, (3, 3), activation="linear", input_shape=(image_size, image_size, 4)))
+    model.add(
+        layers.Conv2D(
+            32,
+            (3, 3),
+            activation="linear",
+        )
+    )
     model.add(layers.LayerNormalization())
     model.add(layers.Activation("relu"))
     model.add(layers.MaxPooling2D((2, 2)))

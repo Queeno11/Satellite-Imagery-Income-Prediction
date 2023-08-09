@@ -25,8 +25,6 @@ import custom_models
 
 import sys
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import os
 from sklearn.model_selection import train_test_split
 from typing import Iterator, List, Union, Tuple, Any
@@ -37,7 +35,7 @@ from tensorflow import keras
 import tensorflow_addons as tfa
 
 from tensorflow.keras import layers, models, Model
-from tensorflow.python.keras.callbacks import (
+from tensorflow.keras.callbacks import (
     TensorBoard,
     EarlyStopping,
     ModelCheckpoint,
@@ -55,7 +53,7 @@ physical_devices = tf.config.list_physical_devices("GPU")
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
-def create_datasets(df, variable, kind, image_size, sample_size, small_sample=False):
+def create_datasets(df, kind, image_size, sample_size, small_sample=False):
     """Accepts four Pandas DataFrames: all your data, the training, validation and test DataFrames. Creates and returns
     keras ImageDataGenerat
     ors. Within this function you can also visualize the augmentations of the ImageDataGenerators.
@@ -87,21 +85,11 @@ def create_datasets(df, variable, kind, image_size, sample_size, small_sample=Fa
 
     assert pd.concat([train, test, val]).sort_index().equals(df)
 
+    ### Benchmarking MSE against the mean
+    print("Benchmarking MSE against the mean")
+    print("Train MSE: ", test["var"].var())
+
     ### dataframes to tf.data.Dataset
-
-    # def img_file_to_tensor(file, label):
-    #     def _img_file_to_tensor(file, label):
-    #         # im = tf.image.decode_jpeg(tf.io.read_file(file), channels=4) # OLD: chequear si funca el nuevo
-    #         im = np.load(file)
-    #         im = np.moveaxis(im, 0, 2) # Move axis so the original [4, 512, 512] becames [512, 512, 4]
-    #         # im = tf.image.resize(im, [224, 224])
-    #         im = tf.cast(im, tf.uint8)
-    #         label = tf.cast(label, tf.float32)
-    #         return im, label
-
-    #     return tf.py_function(
-    #         _img_file_to_tensor, [file, label], [tf.uint8, tf.float32]
-    #     )
 
     def process_image(file_path, label):
         img = np.load(file_path)
@@ -157,7 +145,7 @@ def create_datasets(df, variable, kind, image_size, sample_size, small_sample=Fa
             layers.RandomZoom(0.3, seed=825),
             layers.RandomContrast(0.3, seed=825),
             layers.RandomBrightness(0.4, seed=825),
-            layers.RandomCrop(image_size, image_size, seed=825),
+            # layers.RandomCrop(image_size, image_size, seed=825),
             # layers.Resizing(image_size, image_size),
         ],
         name="data_augmentation",
@@ -267,7 +255,7 @@ def run_model(
     callbacks = get_callbacks(model_name, loss)
     model = model_function
     model.summary()
-    keras.utils.plot_model(model, to_file=model_name + ".png", show_shapes=True)
+    # keras.utils.plot_model(model, to_file=model_name + ".png", show_shapes=True)
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     # opt = tfa.optimizers.RectifiedAdam(learning_rate=lr)
@@ -390,7 +378,11 @@ def run(
     # Set loss and metrics
     if kind == "reg":
         loss = keras.losses.MeanSquaredError()
-        metrics = [keras.metrics.MeanAbsoluteError(), keras.metrics.MeanSquaredError()]
+        metrics = [
+            keras.metrics.MeanAbsoluteError(),
+            keras.metrics.MeanSquaredError(),
+            # keras.metrics.R2Score(),
+        ]
 
     elif kind == "cla":
         loss = keras.losses.CategoricalCrossentropy()
@@ -400,13 +392,13 @@ def run(
         ]
 
     # Clean dataframe and create datasets
-    df = df.dropna(subset=["var"] + ["image"]).reset_index(drop=True)
+    df = df.dropna(how="any").reset_index(drop=True)
     if small_sample:
         df = df.sample(500, random_state=825).reset_index(drop=True)
+    assert all([os.path.isfile(img) for img in df.image.values])
 
     train_dataset, test_dataset, val_dataset, filenames = create_datasets(
         df=df,
-        variable=pred_variable,
         kind=kind,
         small_sample=small_sample,
         image_size=image_size,

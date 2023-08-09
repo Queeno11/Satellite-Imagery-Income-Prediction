@@ -68,7 +68,9 @@ def find_nearest_raster(x_array, y_array, x_value, y_value, max_bias=0):
     return x_idx, y_idx
 
 
-def random_image_from_census_tract(ds, icpag, link, tiles=1, size=100, bias=4, to8bit=True):
+def random_image_from_census_tract(
+    ds, icpag, link, tiles=1, size=100, bias=4, to8bit=True
+):
     """Genera una imagen aleatoria de tamaño size centrada en un punto aleatorio del radio censal {link}.
 
     Parameters:
@@ -90,46 +92,69 @@ def random_image_from_census_tract(ds, icpag, link, tiles=1, size=100, bias=4, t
     images = []
     boundaries = []
     tile_size = size // tiles
+    tiles_generated = 0
     for tile in range(0, tiles**2):
         if tile == 0:
             max_bias = 0
         else:
-            max_bias = bias*size
+            max_bias = bias * size
 
-        # Obtengo un punto aleatorio del radio censal con un buffer de tamaño size
-        x, y = random_point_from_geometry(icpag.loc[icpag["link"] == link], tile_size)
-        point = (x[0], y[0])
+        image = np.zeros((4, 0, 0))
+        counter = 0
+        while (image.shape != (4, tile_size, tile_size)) & (counter <= 4):
+            # Obtengo un punto aleatorio del radio censal con un buffer de tamaño size
+            x, y = random_point_from_geometry(
+                icpag.loc[icpag["link"] == link], tile_size
+            )
+            point = (x[0], y[0])
 
-        # Identifico el raster más cercano a este punto -- va a ser el centro de la imagen
-        idx_x, idx_y = find_nearest_raster(ds.x, ds.y, x, y, max_bias=max_bias)
+            # Identifico el raster más cercano a este punto -- va a ser el centro de la imagen
+            idx_x, idx_y = find_nearest_raster(ds.x, ds.y, x, y, max_bias=max_bias)
 
-        # # Genero el cuadrado que quiero capturar en la imagen
-        idx_x_min = round(idx_x - tile_size / 2)
-        idx_x_max = round(idx_x + tile_size / 2)
-        idx_y_min = round(idx_y - tile_size / 2)
-        idx_y_max = round(idx_y + tile_size / 2)
+            # # Genero el cuadrado que quiero capturar en la imagen
+            idx_x_min = round(idx_x - tile_size / 2)
+            idx_x_max = round(idx_x + tile_size / 2)
+            idx_y_min = round(idx_y - tile_size / 2)
+            idx_y_max = round(idx_y + tile_size / 2)
 
-        # Filtro el dataset para quedarme con esa imagen
-        my_ds = ds.isel(x=slice(idx_x_min, idx_x_max), y=slice(idx_y_min, idx_y_max))
+            # Filtro el dataset para quedarme con esa imagen
+            my_ds = ds.isel(
+                x=slice(idx_x_min, idx_x_max), y=slice(idx_y_min, idx_y_max)
+            )
 
-        image = my_ds.band_data.to_numpy().astype(np.uint16)
-        images += [image]
-        
-        # Get boundaries of the image
-        x_min = my_ds.x.values.min()
-        x_max = my_ds.x.values.max()
-        y_min = my_ds.y.values.min()
-        y_max = my_ds.y.values.max()
-        boundaries += [((x_min, y_min), (x_min, y_max), (x_max, y_max), (x_max, y_min))]
-        
-    stacks = []
-    for i in range(0, tiles):
-        stack = np.hstack(images[i::tiles])
-        stacks += [stack]
+            image = my_ds.band_data.to_numpy().astype(np.uint16)
+            counter += 1
 
-    composition = np.dstack(stacks)
+        if image.shape == (4, tile_size, tile_size):
+            images += [image]
+            # Get boundaries of the image
+            x_min = my_ds.x.values.min()
+            x_max = my_ds.x.values.max()
+            y_min = my_ds.y.values.min()
+            y_max = my_ds.y.values.max()
+            boundaries += [
+                ((x_min, y_min), (x_min, y_max), (x_max, y_max), (x_max, y_min))
+            ]
+            tiles_generated += 1
 
-    if to8bit:
-        composition = np.array(composition >> 6, dtype=np.uint8)
+    # Check if all the tiles were found
+    if tiles_generated == tiles**2:
+        # print("All tiles found")
 
-    return composition, point,boundaries
+        stacks = []
+        for i in range(0, tiles):
+            stack = np.hstack(images[i::tiles])
+            stacks += [stack]
+
+        composition = np.dstack(stacks)
+
+        if to8bit:
+            composition = np.array(composition >> 6, dtype=np.uint8)
+
+    else:
+        # print("Some tiles were not found. Image not generated...")
+        composition = None
+        point = None
+        boundaries = None
+
+    return composition, point, boundaries

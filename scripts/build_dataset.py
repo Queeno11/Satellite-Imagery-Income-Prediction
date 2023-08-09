@@ -39,9 +39,10 @@ def load_satellite_datasets():
     assert os.path.isdir(rf"{path_datain}/Pansharpened/2013")
     files = [f for f in files if f.endswith(".tif")]
     assert all([os.path.isfile(rf"{path_datain}/Pansharpened/2013/{f}") for f in files])
-        
+
     datasets = {
-        f.replace(".tif", ""): xr.open_dataset(rf"{path_datain}/Pansharpened/2013/{f}") for f in files
+        f.replace(".tif", ""): xr.open_dataset(rf"{path_datain}/Pansharpened/2013/{f}")
+        for f in files
     }
     extents = {name: utils.get_dataset_extent(ds) for name, ds in datasets.items()}
 
@@ -65,7 +66,7 @@ def load_icpag_dataset(variable="ln_pred_inc_mean"):
     icpag = icpag.merge(collapse_link, on="link", how="left", validate="1:1")
 
     # Normalize ELL estimation:
-    icpag["var"] = (icpag[variable] - icpag[variable].mean()) / icpag[variable].std() 
+    icpag["var"] = (icpag[variable] - icpag[variable].mean()) / icpag[variable].std()
 
     return icpag
 
@@ -124,29 +125,25 @@ def build_dataset(image_size, sample_size, tiles=1, variable="ln_pred_inc_mean")
             path_image = (
                 rf"{path_dataout}/size{image_size}_sample{sample_size}/{name}.npy"
             )
-            
-            counter = 0
-            while (img.shape != (4, actual_size, actual_size)) & (counter<=4) :
-                # The image could be in the border of the dataset, so we need to try again until we get a valid image
-                img, point, boundaries = utils.random_image_from_census_tract(
-                    current_ds, icpag, link, tiles=tiles, size=actual_size
-                )
-                counter+=1
 
-            if img.shape == (4, actual_size, actual_size):
-                metadata[name] = {
-                    "point": point,
-                    "sample": n,
-                    "link": link,
-                    "image": path_image,
-                    "var": icpag.loc[icpag.link == link, "var"].values[0],
-                    "tiles_boundaries": boundaries,
-                }
+            # The image could be in the border of the dataset, so we need to try again until we get a valid image
+            img, point, boundaries = utils.random_image_from_census_tract(
+                current_ds, icpag, link, tiles=tiles, size=actual_size
+            )
 
-                np.save(
-                    path_image,
-                    img,
-                )
+            metadata[name] = {
+                "link": link,
+                "sample": n,
+                "image": path_image,
+                "var": icpag.loc[icpag.link == link, "var"].values[0],
+                "point": point,
+                "tiles_boundaries": boundaries,
+            }
+
+            np.save(
+                path_image,
+                img,
+            )
 
     metadata = pd.DataFrame().from_dict(metadata, orient="index")
     path_metadata = rf"{path_dataout}/size{image_size}_sample{sample_size}/metadata.csv"
