@@ -74,7 +74,7 @@ def create_datasets(df, kind, image_size, sample_size, small_sample=False):
     Tuple[tf.Dataset, tf.Dataset, tf.Dataset, dict]
         A tuple containing the training, validation and test datasets, and a dictionary with each dataset's filepaths.
     """
-
+    import cv2
     from sklearn.model_selection import train_test_split
 
     # FIXME: hacer set de test arbitrario
@@ -96,6 +96,8 @@ def create_datasets(df, kind, image_size, sample_size, small_sample=False):
         img = np.moveaxis(
             img, 0, 2
         )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
+        img = cv2.resize(img, dsize=(200, 200), interpolation=cv2.INTER_CUBIC)
+
         img = tf.convert_to_tensor(img / 255, dtype=tf.float32)
         label = tf.cast(label, tf.float32)
 
@@ -138,28 +140,26 @@ def create_datasets(df, kind, image_size, sample_size, small_sample=False):
                 seed=825,
                 input_shape=(image_size, image_size, 4),
             ),
-            layers.RandomRotation(0.3, fill_mode="reflect", seed=825),
+            # layers.RandomRotation(0.3, fill_mode="reflect", seed=825),
             layers.RandomTranslation(0.3, 0.3, fill_mode="reflect", seed=825),
-            layers.RandomHeight(0.3),
-            layers.RandomWidth(0.3),
+            # layers.RandomHeight(0.3),
+            # layers.RandomWidth(0.3),
             layers.RandomZoom(0.3, seed=825),
             layers.RandomContrast(0.3, seed=825),
             layers.RandomBrightness(0.4, seed=825),
             # layers.RandomCrop(image_size, image_size, seed=825),
-            # layers.Resizing(image_size, image_size),
         ],
         name="data_augmentation",
     )
 
     # Prepare dataset for training
     train_dataset = (
-        train_dataset.shuffle(round(len(filenames_l[0]) / 10))
-        .batch(64)
-        .map(lambda x, y: (data_augmentation(x), y))
+        train_dataset.shuffle(round(len(filenames_l[0]) / 10)).batch(32)
+        # .map(lambda x, y: (data_augmentation(x), y))
         .prefetch(tf.data.AUTOTUNE)
     )
-    test_dataset = test_dataset.batch(64)
-    val_dataset = val_dataset.batch(64)
+    test_dataset = test_dataset.batch(32)
+    val_dataset = val_dataset.batch(32)
 
     return train_dataset, test_dataset, val_dataset, filenames
 
@@ -337,6 +337,7 @@ def run(
     kind: str,
     weights=None,
     image_size=512,
+    resizing_size=200,
     sample_size=10,
     small_sample=False,
 ):
@@ -349,7 +350,7 @@ def run(
     """
     # Diccionario de modelos
     get_model_from_name = {
-        "small_cnn": custom_models.small_cnn(image_size),  # kind=kind),
+        "small_cnn": custom_models.small_cnn(image_size, resizing_size),  # kind=kind),
         "mobnet_v3": custom_models.mobnet_v3(kind=kind, weights=weights),
         # "resnet152_v2": custom_models.resnet152_v2(kind=kind, weights=weights),
         "effnet_v2_b0": custom_models.effnet_v2_b0(kind=kind, weights=weights),

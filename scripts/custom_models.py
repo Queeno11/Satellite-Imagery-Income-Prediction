@@ -144,7 +144,7 @@ def effnet_v2_l(kind="reg", weights=None) -> Sequential:
     return model
 
 
-def small_cnn(image_size) -> Sequential:
+def small_cnn(image_size, resizing_size=200) -> Sequential:
     """layer normalization entre cada capa y su activación. Batch norm no funca
     porque uso batches de 1, se supone que no funciona bien para muestras de
     menos de 32 (demasiada varianza en las estadísticas de cada batch).
@@ -160,33 +160,27 @@ def small_cnn(image_size) -> Sequential:
     (https://www.pinecone.io/learn/batch-layer-normalization/)"""
 
     model = models.Sequential()
-    model.add(layers.Resizing(200, 200, input_shape=(image_size, image_size, 4)))
 
-    model.add(
-        layers.Conv2D(
-            32,
-            (3, 3),
-            activation="linear",
-        )
-    )
-    model.add(layers.LayerNormalization())
+    model.add(layers.Conv2D(32, (3, 3), activation="linear", input_shape=(resizing_size, resizing_size, 4)))
+    model.add(layers.BatchNormalization())
     model.add(layers.Activation("relu"))
     model.add(layers.MaxPooling2D((2, 2)))
 
     model.add(layers.Conv2D(64, (3, 3), activation="linear"))
-    model.add(layers.LayerNormalization())
+    model.add(layers.BatchNormalization())
     model.add(layers.Activation("relu"))
     model.add(layers.MaxPooling2D((2, 2)))
 
-    model.add(layers.Conv2D(64, (3, 3), activation="linear"))
-    model.add(layers.LayerNormalization())
+    model.add(layers.Conv2D(128, (3, 3), activation="linear"))
+    model.add(layers.BatchNormalization())
     model.add(layers.Activation("relu"))
 
     model.add(layers.Flatten())
-    model.add(layers.Dense(64, activation="linear"))
-    model.add(layers.LayerNormalization())
+    model.add(layers.Dense(128, activation="linear"))
+    model.add(layers.BatchNormalization())
     model.add(layers.Activation("relu"))
 
+    # model.add(layers.Flatten())
     model.add(layers.Dense(1, activation="linear"))
 
     return model
