@@ -10,7 +10,8 @@ from PIL import Image
 from dotenv import dotenv_values
 
 pd.set_option("display.max_columns", None)
-env = dotenv_values("/mnt/d/Maestría/Tesis/Repo/scripts/globals.env")
+# env = dotenv_values("/mnt/d/Maestría/Tesis/Repo/scripts/globals.env")
+env = dotenv_values(r"D:/Maestría/Tesis/Repo/scripts/globals.env")
 
 path_proyecto = env["PATH_PROYECTO"]
 path_datain = env["PATH_DATAIN"]
@@ -87,7 +88,62 @@ def assign_links_to_datasets(icpag, extents):
     return icpag
 
 
-def build_dataset(image_size, sample_size, tiles=1, variable="ln_pred_inc_mean"):
+def split_train_test(metadata):
+    """Blocks are counted from left to right, one count for test and one for train."""
+
+    # Set bounds of test dataset blocks
+    test1_max_x = -58.66
+    test1_min_x = -58.71
+    test2_max_x = -58.36
+    test2_min_x = -58.41
+
+    # These blocks are the test dataset.
+    #   All the images have to be inside the test dataset blocks,
+    #   so the filter is based on x_min and x_max of the images.
+    metadata["type"] = np.nan
+    metadata.loc[
+        ((metadata.min_x > test1_min_x) & (metadata.max_x < test1_max_x))
+        | ((metadata.min_x > test2_min_x) & (metadata.max_x < test2_max_x)),
+        "type",
+    ] = "test"
+
+    ## Clean overlapping borders
+    # Get bounds of train dataset blocks
+    metadata.loc[metadata.x < test1_min_x, "train_block"] = 1
+    metadata.loc[
+        (metadata.x > test1_max_x) & (metadata.x < test2_min_x), "train_block"
+    ] = 2
+    metadata.loc[metadata.x > test2_max_x, "train_block"] = 3
+    print(metadata.train_block.value_counts())
+
+    # Put nans in the overlapping borders
+    metadata.loc[
+        ((metadata.train_block == 1) & (metadata.max_x < test1_min_x))
+        | (
+            (metadata.train_block == 2)
+            & (metadata.min_x > test1_max_x)
+            & (metadata.max_x < test2_min_x)
+        )
+        | ((metadata.train_block == 3) & (metadata.min_x > test2_max_x)),
+        "type",
+    ] = "train"
+    metadata = metadata.drop(columns="train_block")
+
+    test_size = metadata[metadata.type == "test"].shape[0] / metadata.shape[0] * 100
+    train_size = metadata[metadata.type == "train"].shape[0] / metadata.shape[0] * 100
+    invalid_size = metadata[metadata.type.isna()].shape[0] / metadata.shape[0] * 100
+    print(
+        f"Size of test dataset: {test_size:.2f}%\n",
+        f"Size of train dataset: {train_size:.2f}%\n",
+        f"Deleted images due to train/test overlapping: {invalid_size:.2f}%\n",
+    )
+
+    return metadata
+
+
+def build_dataset(
+    image_size, sample_size, tiles=1, bias=4, variable="ln_pred_inc_mean"
+):
     """Build dataset for training the model.
 
     Generates images of size (4, image_size, image_size) and saves them in a folder in npy format.
@@ -112,7 +168,6 @@ def build_dataset(image_size, sample_size, tiles=1, variable="ln_pred_inc_mean")
     print("Generando imágenes...")
     metadata = {}
     actual_size = image_size // tiles * tiles
-
     for link in tqdm(icpag.link.unique()):
         current_ds_name = icpag.loc[icpag.link == link, "dataset"].values[0]
         current_ds = datasets[current_ds_name]
@@ -127,8 +182,8 @@ def build_dataset(image_size, sample_size, tiles=1, variable="ln_pred_inc_mean")
             )
 
             # The image could be in the border of the dataset, so we need to try again until we get a valid image
-            img, point, boundaries = utils.random_image_from_census_tract(
-                current_ds, icpag, link, tiles=tiles, size=actual_size
+            img, point, bounds, total_bounds = utils.random_image_from_census_tract(
+                current_ds, icpag, link, tiles=tiles, size=actual_size, bias=bias
             )
 
             metadata[name] = {
@@ -137,7 +192,13 @@ def build_dataset(image_size, sample_size, tiles=1, variable="ln_pred_inc_mean")
                 "image": path_image,
                 "var": icpag.loc[icpag.link == link, "var"].values[0],
                 "point": point,
-                "tiles_boundaries": boundaries,
+                "x": point[0],
+                "y": point[1],
+                "tiles_boundaries": bounds,
+                "min_x": total_bounds[0],
+                "max_x": total_bounds[1],
+                "min_y": total_bounds[2],
+                "max_y": total_bounds[3],
             }
 
             np.save(
@@ -145,7 +206,14 @@ def build_dataset(image_size, sample_size, tiles=1, variable="ln_pred_inc_mean")
                 img,
             )
 
+    # Metadata to clean dataframe
     metadata = pd.DataFrame().from_dict(metadata, orient="index")
+    metadata = metadata.dropna(how="any").reset_index(drop=True)
+
+    # Train and test split
+    metadata = split_train_test(metadata)
+
+    # Export
     path_metadata = rf"{path_dataout}/size{image_size}_sample{sample_size}/metadata.csv"
     metadata.to_csv(path_metadata)
     print(

@@ -33,6 +33,7 @@ from datetime import datetime
 import tensorflow as tf
 from tensorflow import keras
 import tensorflow_addons as tfa
+import tensorflow_datasets as tfds
 
 from tensorflow.keras import layers, models, Model
 from tensorflow.keras.callbacks import (
@@ -53,7 +54,9 @@ physical_devices = tf.config.list_physical_devices("GPU")
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
-def create_datasets(df, kind, image_size, sample_size, small_sample=False):
+def create_datasets(
+    df, kind, image_size, resizing_size, batch_size, save_examples=True
+):
     """Accepts four Pandas DataFrames: all your data, the training, validation and test DataFrames. Creates and returns
     keras ImageDataGenerat
     ors. Within this function you can also visualize the augmentations of the ImageDataGenerators.
@@ -96,7 +99,9 @@ def create_datasets(df, kind, image_size, sample_size, small_sample=False):
         img = np.moveaxis(
             img, 0, 2
         )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
-        img = cv2.resize(img, dsize=(200, 200), interpolation=cv2.INTER_CUBIC)
+        img = cv2.resize(
+            img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
+        )
 
         img = tf.convert_to_tensor(img / 255, dtype=tf.float32)
         label = tf.cast(label, tf.float32)
@@ -138,15 +143,15 @@ def create_datasets(df, kind, image_size, sample_size, small_sample=False):
             layers.RandomFlip(
                 "horizontal_and_vertical",
                 seed=825,
-                input_shape=(image_size, image_size, 4),
+                input_shape=(resizing_size, resizing_size, 4),
             ),
             # layers.RandomRotation(0.3, fill_mode="reflect", seed=825),
             layers.RandomTranslation(0.3, 0.3, fill_mode="reflect", seed=825),
             # layers.RandomHeight(0.3),
-            # layers.RandomWidth(0.3),
+            # layers.RandomWidth(0.3), # The following are not working good. Must calibrate them!
             layers.RandomZoom(0.3, seed=825),
             layers.RandomContrast(0.3, seed=825),
-            layers.RandomBrightness(0.4, seed=825),
+            layers.RandomBrightness(0.4, value_range=(0, 1), seed=825),
             # layers.RandomCrop(image_size, image_size, seed=825),
         ],
         name="data_augmentation",
@@ -154,12 +159,23 @@ def create_datasets(df, kind, image_size, sample_size, small_sample=False):
 
     # Prepare dataset for training
     train_dataset = (
-        train_dataset.shuffle(round(len(filenames_l[0]) / 10)).batch(32)
+        train_dataset.shuffle(round(len(filenames["train"]) / 10)).batch(batch_size)
         # .map(lambda x, y: (data_augmentation(x), y))
         .prefetch(tf.data.AUTOTUNE)
     )
-    test_dataset = test_dataset.batch(32)
-    val_dataset = val_dataset.batch(32)
+    test_dataset = test_dataset.batch(batch_size)
+    val_dataset = val_dataset.batch(batch_size)
+
+    if save_examples == True:
+        i = 0
+        for x in train_dataset.take(5):
+            np.save(f"{path_outputs}/train_example_{i}_imgs", tfds.as_numpy(x)[0])
+            np.save(f"{path_outputs}/train_example_{i}_labs", tfds.as_numpy(x)[1])
+        for x in val_dataset.take(5):
+            np.save(f"{path_outputs}/val_example_{i}_imgs", tfds.as_numpy(x)[0])
+            np.save(f"{path_outputs}/val_example_{i}_labs", tfds.as_numpy(x)[1])
+
+            i += 1
 
     return train_dataset, test_dataset, val_dataset, filenames
 
@@ -180,12 +196,7 @@ def get_callbacks(
         A list of multiple keras callbacks.
     """
 
-    logdir = (
-        "R:/Tesis Nico/Códigos/logs/scalars/"
-        + model_name
-        + "_"
-        + datetime.now().strftime("%Y%m%d-%H%M%S")
-    )  # create a folder for each model.
+    logdir = f"{path_logs}/{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"  # create a folder for each model.
 
     tensorboard_callback = TensorBoard(
         log_dir=logdir, histogram_freq=1, profile_batch="500,520"
@@ -193,14 +204,14 @@ def get_callbacks(
     # use tensorboard --logdir logs/scalars in your command line to startup tensorboard with the correct logs
 
     # FIXME: Sacar esto
-    early_stopping_callback = EarlyStopping(
-        monitor="val_loss",
-        min_delta=0,  # the training is terminated as soon as the performance measure gets worse from one epoch to the next
-        patience=30,  # amount of epochs with no improvements until the model stops
-        verbose=2,
-        mode="auto",  # the model is stopped when the quantity monitored has stopped decreasing
-        restore_best_weights=True,  # restore the best model with the lowest validation error
-    )
+    # early_stopping_callback = EarlyStopping(
+    #     monitor="val_loss",
+    #     min_delta=0,  # the training is terminated as soon as the performance measure gets worse from one epoch to the next
+    #     patience=30,  # amount of epochs with no improvements until the model stops
+    #     verbose=2,
+    #     mode="auto",  # the model is stopped when the quantity monitored has stopped decreasing
+    #     restore_best_weights=True,  # restore the best model with the lowest validation error
+    # )
 
     model_checkpoint_callback = ModelCheckpoint(
         f"{path_dataout}/models/" + model_name + ".h5",
@@ -213,7 +224,7 @@ def get_callbacks(
 
     return [
         tensorboard_callback,
-        early_stopping_callback,
+        # early_stopping_callback,
         model_checkpoint_callback,
     ]
 
@@ -304,8 +315,8 @@ def plot_predictions_vs_real(df):
         x="real",
         y="pred",
         kind="reg",
-        xlim=(0, df.real.max()),
-        ylim=(0, df.real.max()),
+        xlim=(df.real.min(), df.real.max()),
+        ylim=(df.real.min(), df.real.max()),
         height=10,
         joint_kws={"line_kws": {"color": "cyan"}},
         scatter_kws={"s": 2},
@@ -331,23 +342,7 @@ def plot_predictions_vs_real(df):
     return g
 
 
-def run(
-    model_name: str,
-    pred_variable: str,
-    kind: str,
-    weights=None,
-    image_size=512,
-    resizing_size=200,
-    sample_size=10,
-    small_sample=False,
-):
-    """Run all the code of this file.
-
-    Parameters
-    ----------
-    small_sample : bool, optional
-        If you just want to check if the code is working, set small_sample to True, by default False
-    """
+def set_model_and_loss_function(model_name: str, resizing_size: int, weights: str):
     # Diccionario de modelos
     get_model_from_name = {
         "small_cnn": custom_models.small_cnn(image_size, resizing_size),  # kind=kind),
@@ -359,11 +354,6 @@ def run(
         # "effnet_b0": custom_models.effnet_b0(kind=kind, weights=weights),
     }
 
-    # Open dataframe with files and labels
-    df = pd.read_csv(
-        rf"{path_dataout}/size{image_size}_sample{sample_size}/metadata.csv"
-    )
-
     # Validación de parámetros
     assert kind in ["reg", "cla"], "kind must be either 'reg' or 'cla'"
     assert (
@@ -371,10 +361,9 @@ def run(
     ), "model_name must be one of the following: " + str(
         list(get_model_from_name.keys())
     )
-    # assert (
-    #     pred_variable in df.columns
-    # ), "pred_variable must be one of the following: " + str(list(df.columns))
-    # assert "image" in df.columns, 'df must have a column called "image"'
+
+    # Get model
+    model_function = get_model_from_name[model_name]
 
     # Set loss and metrics
     if kind == "reg":
@@ -392,6 +381,37 @@ def run(
             keras.metrics.CategoricalCrossentropy(),
         ]
 
+    return model, loss, metrics
+
+
+def run(
+    model_name: str,
+    pred_variable: str,
+    kind: str,
+    weights=None,
+    image_size=512,
+    resizing_size=200,
+    sample_size=10,
+    small_sample=False,
+    checkpoint=None,
+):
+    """Run all the code of this file.
+
+    Parameters
+    ----------
+    small_sample : bool, optional
+        If you just want to check if the code is working, set small_sample to True, by default False
+    """
+    ### Set Model & loss function
+    model, loss, metrics = set_model_and_loss_function(
+        model_name=model_name, resizing_size=resizing_size, weights=weights
+    )
+
+    # Open dataframe with files and labels
+    df = pd.read_csv(
+        rf"{path_dataout}/size{image_size}_sample{sample_size}/metadata.csv"
+    )
+
     # Clean dataframe and create datasets
     df = df.dropna(how="any").reset_index(drop=True)
     if small_sample:
@@ -401,16 +421,16 @@ def run(
     train_dataset, test_dataset, val_dataset, filenames = create_datasets(
         df=df,
         kind=kind,
-        small_sample=small_sample,
         image_size=image_size,
-        sample_size=sample_size,
+        resizing_size=resizing_size,
+        batch_size=32,
     )
 
     # Run model
     model, history = run_model(
         model_name=model_name,
         model_function=get_model_from_name[model_name],
-        lr=0.001,  # lr=0.00005 para v0
+        lr=0.00001,  # lr=0.00005 para v0
         train_generator=train_dataset,
         validation_generator=val_dataset,
         test_generator=test_dataset,

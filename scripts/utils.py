@@ -68,6 +68,13 @@ def find_nearest_raster(x_array, y_array, x_value, y_value, max_bias=0):
     return x_idx, y_idx
 
 
+def point_column_to_x_y(df):
+    df.point = df.point.str.replace("\(|\)", "", regex=True).str.split(",")
+    df["x"] = df.point.str[0]
+    df["y"] = df.point.str[1]
+    return df[["x", "y"]]
+
+
 def random_image_from_census_tract(
     ds, icpag, link, tiles=1, size=100, bias=4, to8bit=True
 ):
@@ -91,6 +98,10 @@ def random_image_from_census_tract(
 
     images = []
     boundaries = []
+    x_min = []
+    x_max = []
+    y_min = []
+    y_max = []
     tile_size = size // tiles
     tiles_generated = 0
     for tile in range(0, tiles**2):
@@ -98,7 +109,11 @@ def random_image_from_census_tract(
             max_bias = 0
         else:
             max_bias = bias * size
-
+        # Set min and max values to 0/inf
+        min_x_min = np.inf
+        max_x_max = -999
+        min_y_min = np.inf
+        max_y_max = -999
         image = np.zeros((4, 0, 0))
         counter = 0
         while (image.shape != (4, tile_size, tile_size)) & (counter <= 4):
@@ -127,6 +142,7 @@ def random_image_from_census_tract(
 
         if image.shape == (4, tile_size, tile_size):
             images += [image]
+
             # Get boundaries of the image
             x_min = my_ds.x.values.min()
             x_max = my_ds.x.values.max()
@@ -135,6 +151,18 @@ def random_image_from_census_tract(
             boundaries += [
                 ((x_min, y_min), (x_min, y_max), (x_max, y_max), (x_max, y_min))
             ]
+
+            # Get minumum and maximum values for each axis of all the images
+            if x_min < min_x_min:
+                min_x_min = x_min
+            if x_max > max_x_max:
+                max_x_max = x_max
+            if y_min < min_y_min:
+                min_y_min = y_min
+            if y_max > max_y_max:
+                max_y_max = y_max
+            total_boundaries = (min_x_min, max_x_max, min_y_min, max_y_max)
+
             tiles_generated += 1
 
     # Check if all the tiles were found
@@ -154,7 +182,8 @@ def random_image_from_census_tract(
     else:
         # print("Some tiles were not found. Image not generated...")
         composition = None
-        point = None
+        point = (None, None)
         boundaries = None
+        total_boundaries = (None, None, None, None)
 
-    return composition, point, boundaries
+    return composition, point, boundaries, total_boundaries
