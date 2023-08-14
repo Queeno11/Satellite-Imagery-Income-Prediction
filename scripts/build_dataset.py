@@ -142,7 +142,7 @@ def split_train_test(metadata):
 
 
 def build_dataset(
-    image_size, sample_size, tiles=1, bias=4, variable="ln_pred_inc_mean"
+    image_size, sample_size, tiles=1, bias=2, variable="ln_pred_inc_mean"
 ):
     """Build dataset for training the model.
 
@@ -173,6 +173,7 @@ def build_dataset(
         current_ds = datasets[current_ds_name]
 
         for n in range(sample_size):
+            # FIXME: algo se rompe con n=2... por qué?
             name = f"{link}_{n}"
 
             img = np.zeros((4, 2, 2))

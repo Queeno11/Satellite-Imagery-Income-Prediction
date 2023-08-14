@@ -109,13 +109,15 @@ def random_image_from_census_tract(
             max_bias = 0
         else:
             max_bias = bias * size
+
         # Set min and max values to 0/inf
-        min_x_min = np.inf
+        min_x_min = +999
         max_x_max = -999
-        min_y_min = np.inf
+        min_y_min = +999
         max_y_max = -999
         image = np.zeros((4, 0, 0))
         counter = 0
+
         while (image.shape != (4, tile_size, tile_size)) & (counter <= 4):
             # Obtengo un punto aleatorio del radio censal con un buffer de tamaño size
             x, y = random_point_from_geometry(
@@ -132,16 +134,26 @@ def random_image_from_census_tract(
             idx_y_min = round(idx_y - tile_size / 2)
             idx_y_max = round(idx_y + tile_size / 2)
 
+            # If any of the indexes are negative, move to the next iteration
+            if (
+                (idx_x_min < 0)
+                | (idx_x_max > ds.x.size)
+                | (idx_y_min < 0)
+                | (idx_y_max > ds.y.size)
+            ):
+                counter += 1
+                continue
+
             # Filtro el dataset para quedarme con esa imagen
             my_ds = ds.isel(
                 x=slice(idx_x_min, idx_x_max), y=slice(idx_y_min, idx_y_max)
             )
 
-            image = my_ds.band_data.to_numpy().astype(np.uint16)
+            image = my_ds.band_data
             counter += 1
 
         if image.shape == (4, tile_size, tile_size):
-            images += [image]
+            images += [image.to_numpy().astype(np.uint16)]
 
             # Get boundaries of the image
             x_min = my_ds.x.values.min()
