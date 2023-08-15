@@ -43,12 +43,12 @@ def rebuild_top(model_base, kind="cla") -> Sequential:
     return model
 
 
-def mobnet_v3(kind="reg", weights=None) -> Sequential:
+def mobnet_v3(resizing_size, kind="reg", weights=None) -> Sequential:
     """https://keras.io/api/applications/mobilenet_v3/#mobilenetv3small-function"""
 
     model_base = MobileNetV3Small(
         include_top=False,
-        input_shape=(224, 224, 3),
+        input_shape=(resizing_size, resizing_size, 4),
         weights=weights,
         include_preprocessing=True,
     )
@@ -144,7 +144,7 @@ def effnet_v2_l(kind="reg", weights=None) -> Sequential:
     return model
 
 
-def small_cnn(image_size, resizing_size=200) -> Sequential:
+def small_cnn(resizing_size=200) -> Sequential:
     """layer normalization entre cada capa y su activación. Batch norm no funca
     porque uso batches de 1, se supone que no funciona bien para muestras de
     menos de 32 (demasiada varianza en las estadísticas de cada batch).

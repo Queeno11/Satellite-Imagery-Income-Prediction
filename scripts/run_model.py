@@ -78,15 +78,14 @@ def create_datasets(
         A tuple containing the training, validation and test datasets, and a dictionary with each dataset's filepaths.
     """
     import cv2
-    from sklearn.model_selection import train_test_split
+    import skimage
 
-    # FIXME: hacer set de test arbitrario
     # Train, validation and test split
-    train, test = train_test_split(df, test_size=0.2, shuffle=True, random_state=825)
-    test, val = train_test_split(test, test_size=0.5, shuffle=True, random_state=528)
-    len_test = len(test)
+    train = df[df.type == "train"]
+    test = df[df.type == "test"]
+    # test, val = train_test_split(test, test_size=0.5, shuffle=True, random_state=528)
 
-    assert pd.concat([train, test, val]).sort_index().equals(df)
+    assert pd.concat([train, test]).sort_index().equals(df)
 
     ### Benchmarking MSE against the mean
     print("Benchmarking MSE against the mean")
@@ -102,6 +101,7 @@ def create_datasets(
         img = cv2.resize(
             img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
         )
+        img = skimage.exposure.equalize_hist(img)  # stretch
 
         img = tf.convert_to_tensor(img / 255, dtype=tf.float32)
         label = tf.cast(label, tf.float32)
@@ -111,7 +111,7 @@ def create_datasets(
     # Create tf.data pipeline for each dataset
     datasets = []
     filenames_l = []
-    for dataframe in [train, test, val]:
+    for dataframe in [train, test]:
         # Get list of filenames and corresponding list of labels
         filenames = tf.constant(dataframe["image"].to_list())
         if kind == "reg":
@@ -133,8 +133,11 @@ def create_datasets(
         # Store filenames for later use
         filenames_l += [dataframe["image"].to_list()]
 
-    train_dataset, test_dataset, val_dataset = datasets
-    filenames = {"train": filenames_l[0], "test": filenames_l[1], "val": filenames_l[2]}
+    train_dataset, test_dataset = datasets
+    filenames = {
+        "train": filenames_l[0],
+        "test": filenames_l[1],
+    }  # , "val": filenames_l[2]}
 
     ### augmentations, batching and prefetching
     # Create a data augmentation stage with horizontal flipping, rotations, zooms
@@ -164,20 +167,161 @@ def create_datasets(
         .prefetch(tf.data.AUTOTUNE)
     )
     test_dataset = test_dataset.batch(batch_size)
-    val_dataset = val_dataset.batch(batch_size)
+    # val_dataset = val_dataset.batch(batch_size)
 
     if save_examples == True:
         i = 0
         for x in train_dataset.take(5):
             np.save(f"{path_outputs}/train_example_{i}_imgs", tfds.as_numpy(x)[0])
             np.save(f"{path_outputs}/train_example_{i}_labs", tfds.as_numpy(x)[1])
-        for x in val_dataset.take(5):
-            np.save(f"{path_outputs}/val_example_{i}_imgs", tfds.as_numpy(x)[0])
-            np.save(f"{path_outputs}/val_example_{i}_labs", tfds.as_numpy(x)[1])
-
             i += 1
 
-    return train_dataset, test_dataset, val_dataset, filenames
+    return train_dataset, test_dataset, filenames
+
+
+def create_and_build_datasets(
+    df, kind, image_size, resizing_size, batch_size, save_examples=True
+):
+    """Accepts four Pandas DataFrames: all your data, the training, validation and test DataFrames. Creates and returns
+    keras ImageDataGenerat
+    ors. Within this function you can also visualize the augmentations of the ImageDataGenerators.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Your Pandas DataFrame containing all your data.
+    train : pd.DataFrame
+        Your Pandas DataFrame containing your training data.
+    val : pd.DataFrame
+        Your Pandas DataFrame containing your validation data.
+    test : pd.DataFrame
+        Your Pandas DataFrame containing your testing data.
+
+    Returns
+    -------
+    Tuple[tf.Dataset, tf.Dataset, tf.Dataset, dict]
+        A tuple containing the training, validation and test datasets, and a dictionary with each dataset's filepaths.
+    """
+    import cv2
+    import skimage
+    import utils
+    import build_dataset
+
+    variable = "ln_pred_inc_mean"
+    bias = 2
+    tiles = 2
+    actual_size = image_size // tiles * tiles
+
+    datasets, extents = build_dataset.load_satellite_datasets()
+    icpag = build_dataset.load_icpag_dataset(variable)
+    icpag = build_dataset.assign_links_to_datasets(icpag, extents)
+
+    # Train, validation and test split
+    train = df[df.type == "train"]
+    test = df[df.type == "test"]
+    # test, val = train_test_split(test, test_size=0.5, shuffle=True, random_state=528)
+
+    assert pd.concat([train, test]).sort_index().equals(df)
+
+    ### Benchmarking MSE against the mean
+    print("Benchmarking MSE against the mean")
+    print("Train MSE: ", test["var"].var())
+
+    ### dataframes to tf.data.Dataset
+
+    def normalize_image(img):
+        img = np.moveaxis(
+            img, 0, 2
+        )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
+        img = cv2.resize(
+            img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
+        )
+        img = skimage.exposure.equalize_hist(img)  # stretch
+        return img
+
+    def generate_image(link, label):
+        row = icpag[icpag.link == link]
+        ds_name = row["dataset"].values[0]
+        current_ds = datasets[ds_name]
+
+        img, point, bounds, total_bounds = utils.random_image_from_census_tract(
+            current_ds, icpag, link, tiles=tiles, size=actual_size, bias=bias
+        )
+        img = normalize_image(img)
+        img = tf.convert_to_tensor(img / 255, dtype=tf.float32)
+        label = tf.cast(label, tf.float32)
+
+        return img, label
+
+    # Create tf.data pipeline for each dataset
+    datasets = []
+    links_l = []
+    for dataframe in [train, test]:
+        # Get list of links and corresponding list of labels
+        links = tf.constant(dataframe["image"].to_list())
+        if kind == "reg":
+            labels = tf.constant(dataframe["var"].to_list())
+        elif kind == "cla":
+            labels = tf.one_hot(
+                (df["var"] - 1).to_list(), 10
+            )  # Fist class corresponds to decile 1, etc.
+
+        # Create a dataset from the links and labels
+        dataset = tf.data.Dataset.from_tensor_slices((links, labels))
+        dataset = dataset.map(
+            lambda link, label: tf.numpy_function(
+                generate_image, [link, label], (tf.float32, tf.float32)
+            )
+        )  # Parse every image in the dataset using `map`
+        datasets += [dataset]
+
+        # Store links for later use
+        links_l += [dataframe["image"].to_list()]
+
+    train_dataset, test_dataset = datasets
+    links = {
+        "train": links_l[0],
+        "test": links_l[1],
+    }  # , "val": links_l[2]}
+
+    ### augmentations, batching and prefetching
+    # Create a data augmentation stage with horizontal flipping, rotations, zooms
+    data_augmentation = keras.Sequential(
+        [
+            layers.RandomFlip(
+                "horizontal_and_vertical",
+                seed=825,
+                input_shape=(resizing_size, resizing_size, 4),
+            ),
+            # layers.RandomRotation(0.3, fill_mode="reflect", seed=825),
+            layers.RandomTranslation(0.3, 0.3, fill_mode="reflect", seed=825),
+            # layers.RandomHeight(0.3),
+            # layers.RandomWidth(0.3), # The following are not working good. Must calibrate them!
+            layers.RandomZoom(0.3, seed=825),
+            layers.RandomContrast(0.3, seed=825),
+            layers.RandomBrightness(0.4, value_range=(0, 1), seed=825),
+            # layers.RandomCrop(image_size, image_size, seed=825),
+        ],
+        name="data_augmentation",
+    )
+
+    # Prepare dataset for training
+    train_dataset = (
+        train_dataset.shuffle(round(len(links["train"]) / 10)).batch(batch_size)
+        # .map(lambda x, y: (data_augmentation(x), y))
+        .prefetch(tf.data.AUTOTUNE)
+    )
+    test_dataset = test_dataset.batch(batch_size)
+    # val_dataset = val_dataset.batch(batch_size)
+
+    if save_examples == True:
+        i = 0
+        for x in train_dataset.take(5):
+            np.save(f"{path_outputs}/train_example_{i}_imgs", tfds.as_numpy(x)[0])
+            np.save(f"{path_outputs}/train_example_{i}_labs", tfds.as_numpy(x)[1])
+            i += 1
+
+    return train_dataset, test_dataset, links
 
 
 def get_callbacks(
@@ -278,8 +422,8 @@ def run_model(
     model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
     history = model.fit(
         train_generator,
-        epochs=50,
-        validation_data=validation_generator,
+        epochs=20,
+        validation_data=test_generator,  # FIXME: ¿esto esta bien?
         shuffle=True,
         callbacks=callbacks,
         workers=2,  # adjust this according to the number of CPU cores of your machine
@@ -342,11 +486,13 @@ def plot_predictions_vs_real(df):
     return g
 
 
-def set_model_and_loss_function(model_name: str, resizing_size: int, weights: str):
+def set_model_and_loss_function(
+    model_name: str, kind: str, image_size: int, resizing_size: int, weights: str
+):
     # Diccionario de modelos
     get_model_from_name = {
-        "small_cnn": custom_models.small_cnn(image_size, resizing_size),  # kind=kind),
-        "mobnet_v3": custom_models.mobnet_v3(kind=kind, weights=weights),
+        "small_cnn": custom_models.small_cnn(resizing_size),  # kind=kind),
+        "mobnet_v3": custom_models.mobnet_v3(resizing_size, kind=kind, weights=weights),
         # "resnet152_v2": custom_models.resnet152_v2(kind=kind, weights=weights),
         "effnet_v2_b0": custom_models.effnet_v2_b0(kind=kind, weights=weights),
         "effnet_v2_s": custom_models.effnet_v2_s(kind=kind, weights=weights),
@@ -363,7 +509,7 @@ def set_model_and_loss_function(model_name: str, resizing_size: int, weights: st
     )
 
     # Get model
-    model_function = get_model_from_name[model_name]
+    model = get_model_from_name[model_name]
 
     # Set loss and metrics
     if kind == "reg":
@@ -404,7 +550,11 @@ def run(
     """
     ### Set Model & loss function
     model, loss, metrics = set_model_and_loss_function(
-        model_name=model_name, resizing_size=resizing_size, weights=weights
+        model_name=model_name,
+        kind=kind,
+        image_size=image_size,
+        resizing_size=resizing_size,
+        weights=weights,
     )
 
     # Open dataframe with files and labels
@@ -418,18 +568,19 @@ def run(
         df = df.sample(500, random_state=825).reset_index(drop=True)
     assert all([os.path.isfile(img) for img in df.image.values])
 
-    train_dataset, test_dataset, val_dataset, filenames = create_datasets(
+    train_dataset, test_dataset, filenames = create_datasets(
         df=df,
         kind=kind,
         image_size=image_size,
         resizing_size=resizing_size,
         batch_size=32,
     )
+    val_dataset = [0]
 
     # Run model
     model, history = run_model(
         model_name=model_name,
-        model_function=get_model_from_name[model_name],
+        model_function=model,
         lr=0.00001,  # lr=0.00005 para v0
         train_generator=train_dataset,
         validation_generator=val_dataset,

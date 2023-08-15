@@ -102,6 +102,12 @@ def random_image_from_census_tract(
     x_max = []
     y_min = []
     y_max = []
+
+    min_x_min = +999
+    max_x_max = -999
+    min_y_min = +999
+    max_y_max = -999
+
     tile_size = size // tiles
     tiles_generated = 0
     for tile in range(0, tiles**2):
@@ -110,11 +116,133 @@ def random_image_from_census_tract(
         else:
             max_bias = bias * size
 
-        # Set min and max values to 0/inf
-        min_x_min = +999
-        max_x_max = -999
-        min_y_min = +999
-        max_y_max = -999
+        image = np.zeros((4, 0, 0))
+        counter = 0
+
+        while (image.shape != (4, tile_size, tile_size)) & (counter <= 4):
+            # Obtengo un punto aleatorio del radio censal con un buffer de tamaño size
+            x, y = random_point_from_geometry(
+                icpag.loc[icpag["link"] == link], tile_size
+            )
+            point = (x[0], y[0])
+
+            # Identifico el raster más cercano a este punto -- va a ser el centro de la imagen
+            idx_x, idx_y = find_nearest_raster(ds.x, ds.y, x, y, max_bias=max_bias)
+
+            # # Genero el cuadrado que quiero capturar en la imagen
+            idx_x_min = round(idx_x - tile_size / 2)
+            idx_x_max = round(idx_x + tile_size / 2)
+            idx_y_min = round(idx_y - tile_size / 2)
+            idx_y_max = round(idx_y + tile_size / 2)
+
+            # If any of the indexes are negative, move to the next iteration
+            if (
+                (idx_x_min < 0)
+                | (idx_x_max > ds.x.size)
+                | (idx_y_min < 0)
+                | (idx_y_max > ds.y.size)
+            ):
+                counter += 1
+                continue
+
+            # Filtro el dataset para quedarme con esa imagen
+            my_ds = ds.isel(
+                x=slice(idx_x_min, idx_x_max), y=slice(idx_y_min, idx_y_max)
+            )
+
+            image = my_ds.band_data
+            counter += 1
+
+        if image.shape == (4, tile_size, tile_size):
+            images += [image.to_numpy().astype(np.uint16)]
+
+            # Get boundaries of the image
+            x_min = my_ds.x.values.min()
+            x_max = my_ds.x.values.max()
+            y_min = my_ds.y.values.min()
+            y_max = my_ds.y.values.max()
+            boundaries += [
+                ((x_min, y_min), (x_min, y_max), (x_max, y_max), (x_max, y_min))
+            ]
+
+            # Get minumum and maximum values for each axis of all the images
+            if x_min < min_x_min:
+                min_x_min = x_min
+            if x_max > max_x_max:
+                max_x_max = x_max
+            if y_min < min_y_min:
+                min_y_min = y_min
+            if y_max > max_y_max:
+                max_y_max = y_max
+            total_boundaries = (min_x_min, max_x_max, min_y_min, max_y_max)
+
+            tiles_generated += 1
+
+    # Check if all the tiles were found
+    if tiles_generated == tiles**2:
+        # print("All tiles found")
+
+        stacks = []
+        for i in range(0, tiles):
+            stack = np.hstack(images[i::tiles])
+            stacks += [stack]
+
+        composition = np.dstack(stacks)
+
+        if to8bit:
+            composition = np.array(composition >> 6, dtype=np.uint8)
+
+    else:
+        # print("Some tiles were not found. Image not generated...")
+        composition = None
+        point = (None, None)
+        boundaries = None
+        total_boundaries = (None, None, None, None)
+
+    return composition, point, boundaries, total_boundaries
+
+
+def random_image_from_census_tract_np(
+    ds, icpag, link, tiles=1, size=100, bias=4, to8bit=True
+):
+    """Genera una imagen aleatoria de tamaño size centrada en un punto aleatorio del radio censal {link}.
+
+    Parameters:
+    -----------
+    ds: xarray.Dataset, dataset con las imágenes de satélite
+    icpag: geopandas.GeoDataFrame, shapefile con los radios censales
+    link: str, 9 dígitos que identifican el radio censal
+    size: int, tamaño de la imagen a generar, en píxeles
+    tiles: int, cantidad de imágenes a generar por lado
+    to8bit: bool, si es True, convierte la imagen a 8 bits
+
+    Returns:
+    --------
+    image: numpy.ndarray, imagen de tamaño size x size
+    point: tuple, coordenadas del punto seleccionado
+
+    """
+
+    images = []
+    boundaries = []
+    x_min = []
+    x_max = []
+    y_min = []
+    y_max = []
+
+    min_x_min = +999
+    max_x_max = -999
+    min_y_min = +999
+    max_y_max = -999
+
+    tile_size = size // tiles
+    tiles_generated = 0
+    for tile in range(0, tiles**2):
+        if tile == 0:
+            max_bias = 0
+        else:
+            max_bias = bias * size
+
         image = np.zeros((4, 0, 0))
         counter = 0
 
