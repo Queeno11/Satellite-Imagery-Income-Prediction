@@ -9,6 +9,7 @@ from dotenv import dotenv_values
 
 pd.set_option("display.max_columns", None)
 env = dotenv_values("/mnt/d/Maestría/Tesis/Repo/scripts/globals.env")
+# env = dotenv_values(r"D:/Maestría/Tesis/Repo/scripts/globals.env")
 
 path_proyecto = env["PATH_PROYECTO"]
 path_datain = env["PATH_DATAIN"]
@@ -148,22 +149,25 @@ def create_datasets(
                 seed=825,
                 input_shape=(resizing_size, resizing_size, 4),
             ),
-            # layers.RandomRotation(0.3, fill_mode="reflect", seed=825),
-            layers.RandomTranslation(0.3, 0.3, fill_mode="reflect", seed=825),
-            # layers.RandomHeight(0.3),
-            # layers.RandomWidth(0.3), # The following are not working good. Must calibrate them!
-            layers.RandomZoom(0.3, seed=825),
-            layers.RandomContrast(0.3, seed=825),
-            layers.RandomBrightness(0.4, value_range=(0, 1), seed=825),
-            # layers.RandomCrop(image_size, image_size, seed=825),
+            layers.RandomRotation(0.2, fill_mode="reflect", seed=825),
+            layers.RandomTranslation(0.2, 0.2, fill_mode="reflect", seed=825),
+            layers.RandomHeight(0.2),
+            layers.RandomWidth(
+                0.2
+            ),  # The following are not working good. Must calibrate them!
+            layers.RandomZoom(0.2, seed=825),
+            layers.RandomContrast(0.1, seed=825),
+            layers.RandomBrightness(0.1, value_range=(0, 1), seed=825),
+            layers.RandomCrop(resizing_size, resizing_size, seed=825),
         ],
         name="data_augmentation",
     )
 
     # Prepare dataset for training
     train_dataset = (
-        train_dataset.shuffle(round(len(filenames["train"]) / 10)).batch(batch_size)
-        # .map(lambda x, y: (data_augmentation(x), y))
+        train_dataset.shuffle(round(len(filenames["train"]) / 10))
+        .batch(batch_size)
+        .map(lambda x, y: (data_augmentation(x), y))
         .prefetch(tf.data.AUTOTUNE)
     )
     test_dataset = test_dataset.batch(batch_size)
@@ -177,151 +181,6 @@ def create_datasets(
             i += 1
 
     return train_dataset, test_dataset, filenames
-
-
-def create_and_build_datasets(
-    df, kind, image_size, resizing_size, batch_size, save_examples=True
-):
-    """Accepts four Pandas DataFrames: all your data, the training, validation and test DataFrames. Creates and returns
-    keras ImageDataGenerat
-    ors. Within this function you can also visualize the augmentations of the ImageDataGenerators.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Your Pandas DataFrame containing all your data.
-    train : pd.DataFrame
-        Your Pandas DataFrame containing your training data.
-    val : pd.DataFrame
-        Your Pandas DataFrame containing your validation data.
-    test : pd.DataFrame
-        Your Pandas DataFrame containing your testing data.
-
-    Returns
-    -------
-    Tuple[tf.Dataset, tf.Dataset, tf.Dataset, dict]
-        A tuple containing the training, validation and test datasets, and a dictionary with each dataset's filepaths.
-    """
-    import cv2
-    import skimage
-    import utils
-    import build_dataset
-
-    variable = "ln_pred_inc_mean"
-    bias = 2
-    tiles = 2
-    actual_size = image_size // tiles * tiles
-
-    datasets, extents = build_dataset.load_satellite_datasets()
-    icpag = build_dataset.load_icpag_dataset(variable)
-    icpag = build_dataset.assign_links_to_datasets(icpag, extents)
-
-    # Train, validation and test split
-    train = df[df.type == "train"]
-    test = df[df.type == "test"]
-    # test, val = train_test_split(test, test_size=0.5, shuffle=True, random_state=528)
-
-    assert pd.concat([train, test]).sort_index().equals(df)
-
-    ### Benchmarking MSE against the mean
-    print("Benchmarking MSE against the mean")
-    print("Train MSE: ", test["var"].var())
-
-    ### dataframes to tf.data.Dataset
-
-    def normalize_image(img):
-        img = np.moveaxis(
-            img, 0, 2
-        )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
-        img = cv2.resize(
-            img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
-        )
-        img = skimage.exposure.equalize_hist(img)  # stretch
-        return img
-
-    def generate_image(link, label):
-        row = icpag[icpag.link == link]
-        ds_name = row["dataset"].values[0]
-        current_ds = datasets[ds_name]
-
-        img, point, bounds, total_bounds = utils.random_image_from_census_tract(
-            current_ds, icpag, link, tiles=tiles, size=actual_size, bias=bias
-        )
-        img = normalize_image(img)
-        img = tf.convert_to_tensor(img / 255, dtype=tf.float32)
-        label = tf.cast(label, tf.float32)
-
-        return img, label
-
-    # Create tf.data pipeline for each dataset
-    datasets = []
-    links_l = []
-    for dataframe in [train, test]:
-        # Get list of links and corresponding list of labels
-        links = tf.constant(dataframe["image"].to_list())
-        if kind == "reg":
-            labels = tf.constant(dataframe["var"].to_list())
-        elif kind == "cla":
-            labels = tf.one_hot(
-                (df["var"] - 1).to_list(), 10
-            )  # Fist class corresponds to decile 1, etc.
-
-        # Create a dataset from the links and labels
-        dataset = tf.data.Dataset.from_tensor_slices((links, labels))
-        dataset = dataset.map(
-            lambda link, label: tf.numpy_function(
-                generate_image, [link, label], (tf.float32, tf.float32)
-            )
-        )  # Parse every image in the dataset using `map`
-        datasets += [dataset]
-
-        # Store links for later use
-        links_l += [dataframe["image"].to_list()]
-
-    train_dataset, test_dataset = datasets
-    links = {
-        "train": links_l[0],
-        "test": links_l[1],
-    }  # , "val": links_l[2]}
-
-    ### augmentations, batching and prefetching
-    # Create a data augmentation stage with horizontal flipping, rotations, zooms
-    data_augmentation = keras.Sequential(
-        [
-            layers.RandomFlip(
-                "horizontal_and_vertical",
-                seed=825,
-                input_shape=(resizing_size, resizing_size, 4),
-            ),
-            # layers.RandomRotation(0.3, fill_mode="reflect", seed=825),
-            layers.RandomTranslation(0.3, 0.3, fill_mode="reflect", seed=825),
-            # layers.RandomHeight(0.3),
-            # layers.RandomWidth(0.3), # The following are not working good. Must calibrate them!
-            layers.RandomZoom(0.3, seed=825),
-            layers.RandomContrast(0.3, seed=825),
-            layers.RandomBrightness(0.4, value_range=(0, 1), seed=825),
-            # layers.RandomCrop(image_size, image_size, seed=825),
-        ],
-        name="data_augmentation",
-    )
-
-    # Prepare dataset for training
-    train_dataset = (
-        train_dataset.shuffle(round(len(links["train"]) / 10)).batch(batch_size)
-        # .map(lambda x, y: (data_augmentation(x), y))
-        .prefetch(tf.data.AUTOTUNE)
-    )
-    test_dataset = test_dataset.batch(batch_size)
-    # val_dataset = val_dataset.batch(batch_size)
-
-    if save_examples == True:
-        i = 0
-        for x in train_dataset.take(5):
-            np.save(f"{path_outputs}/train_example_{i}_imgs", tfds.as_numpy(x)[0])
-            np.save(f"{path_outputs}/train_example_{i}_labs", tfds.as_numpy(x)[1])
-            i += 1
-
-    return train_dataset, test_dataset, links
 
 
 def get_callbacks(

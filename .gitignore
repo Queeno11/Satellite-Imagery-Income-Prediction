@@ -2,7 +2,7 @@
 !.gitignore
 !/scripts
 /scripts/_old
-
+/logs
 *.dbf
 *.cpg
 *.shp

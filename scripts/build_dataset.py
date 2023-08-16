@@ -10,8 +10,8 @@ from PIL import Image
 from dotenv import dotenv_values
 
 pd.set_option("display.max_columns", None)
-# env = dotenv_values("/mnt/d/Maestría/Tesis/Repo/scripts/globals.env")
-env = dotenv_values(r"D:/Maestría/Tesis/Repo/scripts/globals.env")
+env = dotenv_values("/mnt/d/Maestría/Tesis/Repo/scripts/globals.env")
+# env = dotenv_values(r"D:/Maestría/Tesis/Repo/scripts/globals.env")
 
 path_proyecto = env["PATH_PROYECTO"]
 path_datain = env["PATH_DATAIN"]
@@ -139,6 +139,53 @@ def split_train_test(metadata):
     )
 
     return metadata
+
+
+def assert_train_test_datapoint(point, bounds, wanted_type="train"):
+    """Blocks are counted from left to right, one count for test and one for train."""
+
+    # Split bounds:
+    min_x = bounds[0]
+    max_x = bounds[2]
+
+    # Set bounds of test dataset blocks
+    test1_max_x = -58.66
+    test1_min_x = -58.71
+    test2_max_x = -58.36
+    test2_min_x = -58.41
+
+    # These blocks are the test dataset.
+    #   All the images have to be inside the test dataset blocks,
+    #   so the filter is based on x_min and x_max of the images.
+    type = None
+    if ((min_x > test1_min_x) & (max_x < test1_max_x)) | (
+        (min_x > test2_min_x) & (max_x < test2_max_x)
+    ):
+        type = "test"
+
+    ## Clean overlapping borders
+    # Get bounds of train dataset blocks
+    if point[0] < test1_min_x:
+        train_block = 1
+    elif (point[0] > test1_max_x) & (point[0] < test2_min_x):
+        train_block = 2
+    elif point[0] > test2_max_x:
+        train_block = 3
+
+    # Put nans in the overlapping borders
+    if (train_block == 1) & (max_x < test1_min_x):
+        type = "train"
+    elif (train_block == 2) & (min_x > test1_max_x) & (max_x < test2_min_x):
+        type = "train"
+    elif (train_block == 3) & (min_x > test2_max_x):
+        type = "train"
+
+    # Assert type
+    if type == wanted_type:
+        istype = True
+    else:
+        istype = False
+    return istype
 
 
 def build_dataset(
