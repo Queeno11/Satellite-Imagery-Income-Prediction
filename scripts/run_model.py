@@ -8,8 +8,10 @@ from typing import List, Dict
 from dotenv import dotenv_values
 
 pd.set_option("display.max_columns", None)
-env = dotenv_values("/mnt/d/Maestría/Tesis/Repo/scripts/globals.env")
-# env = dotenv_values(r"D:/Maestría/Tesis/Repo/scripts/globals.env")
+try:
+    env = dotenv_values("/mnt/d/Maestría/Tesis/Repo/scripts/globals.env")
+except:
+    env = dotenv_values(r"D:/Maestría/Tesis/Repo/scripts/globals_win.env")
 
 path_proyecto = env["PATH_PROYECTO"]
 path_datain = env["PATH_DATAIN"]
@@ -27,13 +29,11 @@ import custom_models
 import sys
 import pandas as pd
 import os
-from sklearn.model_selection import train_test_split
 from typing import Iterator, List, Union, Tuple, Any
 from datetime import datetime
 
 import tensorflow as tf
 from tensorflow import keras
-import tensorflow_addons as tfa
 import tensorflow_datasets as tfds
 
 from tensorflow.keras import layers, models, Model
@@ -43,11 +43,6 @@ from tensorflow.keras.callbacks import (
     ModelCheckpoint,
 )
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.applications import (
-    MobileNetV3Small,
-    EfficientNetB0,
-    EfficientNetV2B0,
-)
 
 # the next 3 lines of code are for my machine and setup due to https://github.com/tensorflow/tensorflow/issues/43174
 
@@ -90,7 +85,8 @@ def create_datasets(
 
     ### Benchmarking MSE against the mean
     print("Benchmarking MSE against the mean")
-    print("Train MSE: ", test["var"].var())
+    print("Train MSE: ", train["var"].var())
+    print("Test MSE: ", test["var"].var())
 
     ### dataframes to tf.data.Dataset
 
@@ -99,12 +95,16 @@ def create_datasets(
         img = np.moveaxis(
             img, 0, 2
         )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
-        img = cv2.resize(
-            img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
-        )
-        img = skimage.exposure.equalize_hist(img)  # stretch
+        # img = img[:, :, :3]  # FIXME: remove this line when using 4 channels
+        if image_size != resizing_size:
+            img = cv2.resize(
+                img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
+            )
+        img = skimage.exposure.equalize_hist(
+            img
+        )  # stretch # FIXME: ¿equalizar imagen por imagen o el tileset entero?
 
-        img = tf.convert_to_tensor(img / 255, dtype=tf.float32)
+        img = tf.convert_to_tensor(img, dtype=tf.float32)
         label = tf.cast(label, tf.float32)
 
         return img, label
@@ -127,7 +127,8 @@ def create_datasets(
         dataset = dataset.map(
             lambda file, label: tf.numpy_function(
                 process_image, [file, label], (tf.float32, tf.float32)
-            )
+            ),
+            num_parallel_calls=tf.data.AUTOTUNE,
         )  # Parse every image in the dataset using `map`
         datasets += [dataset]
 
@@ -140,34 +141,58 @@ def create_datasets(
         "test": filenames_l[1],
     }  # , "val": filenames_l[2]}
 
-    ### augmentations, batching and prefetching
-    # Create a data augmentation stage with horizontal flipping, rotations, zooms
-    data_augmentation = keras.Sequential(
-        [
-            layers.RandomFlip(
-                "horizontal_and_vertical",
-                seed=825,
-                input_shape=(resizing_size, resizing_size, 4),
-            ),
-            layers.RandomRotation(0.2, fill_mode="reflect", seed=825),
-            layers.RandomTranslation(0.2, 0.2, fill_mode="reflect", seed=825),
-            layers.RandomHeight(0.2),
-            layers.RandomWidth(
-                0.2
-            ),  # The following are not working good. Must calibrate them!
-            layers.RandomZoom(0.2, seed=825),
-            layers.RandomContrast(0.1, seed=825),
-            layers.RandomBrightness(0.1, value_range=(0, 1), seed=825),
-            layers.RandomCrop(resizing_size, resizing_size, seed=825),
-        ],
-        name="data_augmentation",
-    )
+    # Create a generator.
+    rng = tf.random.Generator.from_seed(123, alg="philox")
+
+    def augment(image_label, seed):
+        image, label = image_label
+        # Adjust brightness
+        image = tf.image.stateless_random_brightness(image, max_delta=0.2, seed=seed)
+        image = tf.clip_by_value(image, 0, 1)
+        # Flip images # FIXME: ¿esta bien hacer esto por batches o tendría que cambiar el seed acá
+        tf.image.stateless_random_flip_left_right(image, seed)
+        tf.image.stateless_random_flip_up_down(image, seed)
+
+        return image, label
+
+        # Split tensor
+        # image_rgb = image
+        # [:, :, :3]
+        # image_nr = image[:, :, 3:4]
+
+        # RGB augmentation
+        # image_rgb = tf.image.random_flip_left_right(image_rgb)
+        # image_rgb = tf.image.random_flip_up_down(image_rgb)
+        # image_rgb = tf.image.random_contrast(image_rgb, lower=0.2, upper=1.5)
+        # image_rgb = tf.image.random_brightness(image_rgb, max_delta=0.2)
+        # image_rgb = tf.image.resize(
+        #     image_rgb, (resizing_size, resizing_size), antialias=True
+        # )
+
+        # # Near infrared augmentation
+        # image_rgb = tf.image.resize(
+        #     image_rgb, (resizing_size, resizing_size), antialias=True
+        # )
+
+        # Rebuild image channels
+        # test_image = tf.concat([image_rgb, image_nr], 2).numpy()
+
+        # return image_rgb
+
+    # Create a wrapper function for updating seeds.
+    def data_augmentation(x, y):
+        seed = rng.make_seeds(2)[0]
+        image, label = augment((x, y), seed)
+        return image, label
 
     # Prepare dataset for training
     train_dataset = (
-        train_dataset.shuffle(round(len(filenames["train"]) / 10))
+        train_dataset.shuffle(1000)
         .batch(batch_size)
-        .map(lambda x, y: (data_augmentation(x), y))
+        .map(
+            data_augmentation,
+            num_parallel_calls=tf.data.AUTOTUNE,
+        )
         .prefetch(tf.data.AUTOTUNE)
     )
     test_dataset = test_dataset.batch(batch_size)
@@ -179,7 +204,12 @@ def create_datasets(
             np.save(f"{path_outputs}/train_example_{i}_imgs", tfds.as_numpy(x)[0])
             np.save(f"{path_outputs}/train_example_{i}_labs", tfds.as_numpy(x)[1])
             i += 1
-
+        i = 0
+        for x in test_dataset.take(5):
+            np.save(f"{path_outputs}/test_example_{i}_imgs", tfds.as_numpy(x)[0])
+            np.save(f"{path_outputs}/test_example_{i}_labs", tfds.as_numpy(x)[1])
+            i += 1
+    print("Dataset generado!")
     return train_dataset, test_dataset, filenames
 
 
@@ -215,18 +245,22 @@ def get_callbacks(
     #     mode="auto",  # the model is stopped when the quantity monitored has stopped decreasing
     #     restore_best_weights=True,  # restore the best model with the lowest validation error
     # )
+    reduce_lr = keras.callbacks.ReduceLROnPlateau(
+        monitor="val_loss", factor=0.2, patience=10, min_lr=0.0000001
+    )
 
     model_checkpoint_callback = ModelCheckpoint(
-        f"{path_dataout}/models/" + model_name + ".h5",
+        f"{path_dataout}/models/{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}",
         monitor="val_loss",
-        verbose=0,
-        save_best_only=True,  # save the best model
+        verbose=1,
+        # save_best_only=True,  # save the best model
         mode="auto",
         save_freq="epoch",  # save every epoch
     )  # saving eff_net takes quite a bit of time
 
     return [
         tensorboard_callback,
+        # reduce_lr,
         # early_stopping_callback,
         model_checkpoint_callback,
     ]
@@ -236,11 +270,13 @@ def run_model(
     model_name: str,
     model_function: Model,
     lr: float,
-    train_generator: Iterator,
-    validation_generator: Iterator,
-    test_generator: Iterator,
+    train_dataset: Iterator,
+    test_dataset: Iterator,
     loss: str,
     metrics: List[str],
+    model_path: str = None,
+    epochs: int = 20,
+    initial_epoch: int = 0,
 ):
     """This function runs a keras model with the Ranger optimizer and multiple callbacks. The model is evaluated within
     training through the validation generator and afterwards one final time on the test generator.
@@ -253,43 +289,65 @@ def run_model(
         Keras model function like small_cnn()  or adapt_efficient_net().
     lr : float
         Learning rate.
-    train_generator : Iterator
-        keras ImageDataGenerators for the training data.
-    validation_generator : Iterator
-        keras ImageDataGenerators for the validation data.
-    test_generator : Iterator
-        keras ImageDataGenerators for the test data.
+    train_dataset : Iterator
+        tensorflow dataset for the training data.
+    test_dataset : Iterator
+        tesorflow dataset for the test data.
+    loss: str
+        Loss function.
+    metrics: List[str]
+        List of metrics to be used.
+    model_path : str, optional
+        Path to the model if restored from previous training, by default None.
+    epochs : int, optional
+        Number of epochs to train, by default 20.
+    initial_epoch : int, optional
+        Initial epoch, by default 0. If restoring training
+
 
     Returns
     -------
     History
         The history of the keras model as a History object. To access it as a Dict, use history.history.
     """
+    import tensorflow.python.keras.backend as K
 
     callbacks = get_callbacks(model_name, loss)
-    model = model_function
-    model.summary()
-    # keras.utils.plot_model(model, to_file=model_name + ".png", show_shapes=True)
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-    # opt = tfa.optimizers.RectifiedAdam(learning_rate=lr)
-    # # Nesterov Accelerated Gradient (NAG)
-    # #   https://kyle-r-kieser.medium.com/tuning-your-keras-sgd-neural-network-optimizer-768536c7ef0
-    # opt = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True)  #  1=No friction
-    # optimizer = tfa.optimizers.Lookahead(opt, sync_period=6, slow_step_size=0.5)
+    if model_path is None:
+        # constructs the model and compiles it
+        model = model_function
+        model.summary()
+        # keras.utils.plot_model(model, to_file=model_name + ".png", show_shapes=True)
 
-    model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+        # opt = tfa.optimizers.RectifiedAdam(learning_rate=lr)
+        # # Nesterov Accelerated Gradient (NAG)
+        # #   https://kyle-r-kieser.medium.com/tuning-your-keras-sgd-neural-network-optimizer-768536c7ef0
+        # optimizer = tf.keras.optimizers.SGD(
+        #     learning_rate=lr, momentum=0.9, nesterov=True
+        # )  #  1=No friction
+
+        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+        initial_epoch = 0
+    else:
+        # assert os.path.isfolder(
+        #     model_path
+        # ), "model_path must be a valid path to a model"
+        model = keras.models.load_model(model_path)  # load the model from file
+        initial_epoch = initial_epoch
+
     history = model.fit(
-        train_generator,
-        epochs=20,
-        validation_data=test_generator,  # FIXME: ¿esto esta bien?
-        shuffle=True,
+        train_dataset,
+        epochs=epochs,
+        initial_epoch=initial_epoch,
+        validation_data=test_dataset,
         callbacks=callbacks,
         workers=2,  # adjust this according to the number of CPU cores of your machine
     )
 
     model.evaluate(
-        test_generator,
+        test_dataset,
         callbacks=callbacks,
     )
     return model, history  # type: ignore
@@ -353,7 +411,7 @@ def set_model_and_loss_function(
         "small_cnn": custom_models.small_cnn(resizing_size),  # kind=kind),
         "mobnet_v3": custom_models.mobnet_v3(resizing_size, kind=kind, weights=weights),
         # "resnet152_v2": custom_models.resnet152_v2(kind=kind, weights=weights),
-        "effnet_v2_b0": custom_models.effnet_v2_b0(kind=kind, weights=weights),
+        "effnet_v2_b2": custom_models.effnet_v2_b2(kind=kind, weights=weights),
         "effnet_v2_s": custom_models.effnet_v2_s(kind=kind, weights=weights),
         "effnet_v2_l": custom_models.effnet_v2_l(kind=kind, weights=weights),
         # "effnet_b0": custom_models.effnet_b0(kind=kind, weights=weights),
@@ -416,17 +474,23 @@ def run(
         weights=weights,
     )
 
+    print("Reading dataset...")
     # Open dataframe with files and labels
     df = pd.read_csv(
         rf"{path_dataout}/size{image_size}_sample{sample_size}/metadata.csv"
     )
+    print("Dataset loaded!")
 
+    print("Cleaning dataset...")
     # Clean dataframe and create datasets
+    # df = df[df["sample"] <= 2]
     df = df.dropna(how="any").reset_index(drop=True)
     if small_sample:
-        df = df.sample(500, random_state=825).reset_index(drop=True)
-    assert all([os.path.isfile(img) for img in df.image.values])
+        df = df.sample(2000, random_state=825).reset_index(drop=True)
 
+    # assert all([os.path.isfile(img) for img in df.image.values])
+
+    print("Moving dataset to tensorflow ds...")
     train_dataset, test_dataset, filenames = create_datasets(
         df=df,
         kind=kind,
@@ -440,12 +504,14 @@ def run(
     model, history = run_model(
         model_name=model_name,
         model_function=model,
-        lr=0.00001,  # lr=0.00005 para v0
-        train_generator=train_dataset,
-        validation_generator=val_dataset,
-        test_generator=test_dataset,
+        lr=0.0001,  # lr=0.00009 para mobnet_v3_20230823-141458
+        train_dataset=train_dataset,
+        test_dataset=test_dataset,
         loss=loss,
         metrics=metrics,
+        epochs=100,
+        model_path=f"{path_dataout}/models/mobnet_v3_20230831-172738",
+        initial_epoch=50,
     )
 
     predicted_array = prediction_tools.get_predicted_values(
@@ -460,14 +526,17 @@ def run(
         "pred": predicted_array.flatten(),
     }
     df_prediciones = pd.DataFrame(data=d)
-    print("Correlation matrix:", df_prediciones[["real", "pred"]].corr())
+    print("R2 matrix:", df_prediciones[["real", "pred"]].corr() ** 2)
     df_prediciones.to_parquet(
-        f"{path_dataout}/preds_{model_name}_{pred_variable}.parquet"
+        f"{path_dataout}/preds_{pred_variable}_{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}.parquet"
     )
 
     # Genero gráficos de predicciones en el set de prueba
     g = plot_predictions_vs_real(df_prediciones)
-    g.savefig(rf"{path_dataout}/scatterplot_{pred_variable}_{model_name}.png", dpi=300)
+    g.savefig(
+        rf"{path_dataout}/scatterplot_{pred_variable}_{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}.png",
+        dpi=300,
+    )
 
 
 if __name__ == "__main__":

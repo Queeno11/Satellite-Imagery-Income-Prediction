@@ -7,14 +7,14 @@ from run_model import run
 ## Visualizar data augmentation
 
 ### PARAMETERS ###
-image_size = 500
-sample_size = 1
-resizing_size = 200
+image_size = 512
+sample_size = 5
+resizing_size = 128
 tiles = 1
 
 variable = "ln_pred_inc_mean"
 kind = "reg"
-model = "small_cnn"
+model = "mobnet_v3"
 
 # Step 1: Run Pansharpening in QGIS to get the images in high resolution
 # Step 2: Run build_dataset to generate the dataset (npy files and metadata.csv)
@@ -28,7 +28,7 @@ run(
     pred_variable=variable,
     kind=kind,
     small_sample=False,
-    # weights="imagenet",
+    weights=None,
     image_size=image_size,
     sample_size=sample_size,
     resizing_size=resizing_size,
