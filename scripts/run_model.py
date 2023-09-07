@@ -8,7 +8,10 @@ from typing import List, Dict
 from dotenv import dotenv_values
 
 pd.set_option("display.max_columns", None)
-env = dotenv_values("/mnt/d/Maestría/Tesis/Repo/scripts/globals.env")
+try:
+    env = dotenv_values("/mnt/d/Maestría/Tesis/Repo/scripts/globals.env")
+except:
+    env = dotenv_values(r"D:/Maestría/Tesis/Repo/scripts/globals_win.env")
 
 path_proyecto = env["PATH_PROYECTO"]
 path_datain = env["PATH_DATAIN"]
@@ -22,17 +25,17 @@ path_outputs = env["PATH_OUTPUTS"]
 
 import prediction_tools
 import custom_models
+import build_dataset
+import utils
 
 import sys
 import pandas as pd
 import os
-from sklearn.model_selection import train_test_split
 from typing import Iterator, List, Union, Tuple, Any
 from datetime import datetime
 
 import tensorflow as tf
 from tensorflow import keras
-import tensorflow_addons as tfa
 import tensorflow_datasets as tfds
 
 from tensorflow.keras import layers, models, Model
@@ -42,16 +45,25 @@ from tensorflow.keras.callbacks import (
     ModelCheckpoint,
 )
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.applications import (
-    MobileNetV3Small,
-    EfficientNetB0,
-    EfficientNetV2B0,
-)
+import cv2
+import skimage
 
 # the next 3 lines of code are for my machine and setup due to https://github.com/tensorflow/tensorflow/issues/43174
 
 physical_devices = tf.config.list_physical_devices("GPU")
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
+
+
+# Disable
+def blockPrint():
+    sys.__stdout__ = sys.stdout
+    sys.stdout = open(os.devnull, "w")
+
+
+# Restore
+def enablePrint():
+    sys.stdout.close()
+    sys.stdout = sys.__stdout__
 
 
 def create_datasets(
@@ -77,8 +89,6 @@ def create_datasets(
     Tuple[tf.Dataset, tf.Dataset, tf.Dataset, dict]
         A tuple containing the training, validation and test datasets, and a dictionary with each dataset's filepaths.
     """
-    import cv2
-    import skimage
 
     # Train, validation and test split
     train = df[df.type == "train"]
@@ -89,21 +99,15 @@ def create_datasets(
 
     ### Benchmarking MSE against the mean
     print("Benchmarking MSE against the mean")
-    print("Train MSE: ", test["var"].var())
+    print("Train MSE: ", train["var"].var())
+    print("Test MSE: ", test["var"].var())
 
     ### dataframes to tf.data.Dataset
 
-    def process_image(file_path, label):
+    def tf_process_image(file_path, label):
         img = np.load(file_path)
-        img = np.moveaxis(
-            img, 0, 2
-        )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
-        img = cv2.resize(
-            img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
-        )
-        img = skimage.exposure.equalize_hist(img)  # stretch
-
-        img = tf.convert_to_tensor(img / 255, dtype=tf.float32)
+        img = utils.process_image(img, resizing_size)
+        img = tf.convert_to_tensor(img, dtype=tf.float32)
         label = tf.cast(label, tf.float32)
 
         return img, label
@@ -125,8 +129,9 @@ def create_datasets(
         dataset = tf.data.Dataset.from_tensor_slices((filenames, labels))
         dataset = dataset.map(
             lambda file, label: tf.numpy_function(
-                process_image, [file, label], (tf.float32, tf.float32)
-            )
+                tf_process_image, [file, label], (tf.float32, tf.float32)
+            ),
+            num_parallel_calls=tf.data.AUTOTUNE,
         )  # Parse every image in the dataset using `map`
         datasets += [dataset]
 
@@ -139,31 +144,58 @@ def create_datasets(
         "test": filenames_l[1],
     }  # , "val": filenames_l[2]}
 
-    ### augmentations, batching and prefetching
-    # Create a data augmentation stage with horizontal flipping, rotations, zooms
-    data_augmentation = keras.Sequential(
-        [
-            layers.RandomFlip(
-                "horizontal_and_vertical",
-                seed=825,
-                input_shape=(resizing_size, resizing_size, 4),
-            ),
-            # layers.RandomRotation(0.3, fill_mode="reflect", seed=825),
-            layers.RandomTranslation(0.3, 0.3, fill_mode="reflect", seed=825),
-            # layers.RandomHeight(0.3),
-            # layers.RandomWidth(0.3), # The following are not working good. Must calibrate them!
-            layers.RandomZoom(0.3, seed=825),
-            layers.RandomContrast(0.3, seed=825),
-            layers.RandomBrightness(0.4, value_range=(0, 1), seed=825),
-            # layers.RandomCrop(image_size, image_size, seed=825),
-        ],
-        name="data_augmentation",
-    )
+    # Create a generator.
+    rng = tf.random.Generator.from_seed(123, alg="philox")
+
+    def augment(image_label, seed):
+        image, label = image_label
+        # Adjust brightness
+        image = tf.image.stateless_random_brightness(image, max_delta=0.2, seed=seed)
+        image = tf.clip_by_value(image, 0, 1)
+        # Flip images # FIXME: ¿esta bien hacer esto por batches o tendría que cambiar el seed acá
+        tf.image.stateless_random_flip_left_right(image, seed)
+        tf.image.stateless_random_flip_up_down(image, seed)
+
+        return image, label
+
+        # Split tensor
+        # image_rgb = image
+        # [:, :, :3]
+        # image_nr = image[:, :, 3:4]
+
+        # RGB augmentation
+        # image_rgb = tf.image.random_flip_left_right(image_rgb)
+        # image_rgb = tf.image.random_flip_up_down(image_rgb)
+        # image_rgb = tf.image.random_contrast(image_rgb, lower=0.2, upper=1.5)
+        # image_rgb = tf.image.random_brightness(image_rgb, max_delta=0.2)
+        # image_rgb = tf.image.resize(
+        #     image_rgb, (resizing_size, resizing_size), antialias=True
+        # )
+
+        # # Near infrared augmentation
+        # image_rgb = tf.image.resize(
+        #     image_rgb, (resizing_size, resizing_size), antialias=True
+        # )
+
+        # Rebuild image channels
+        # test_image = tf.concat([image_rgb, image_nr], 2).numpy()
+
+        # return image_rgb
+
+    # Create a wrapper function for updating seeds.
+    def data_augmentation(x, y):
+        seed = rng.make_seeds(2)[0]
+        image, label = augment((x, y), seed)
+        return image, label
 
     # Prepare dataset for training
     train_dataset = (
-        train_dataset.shuffle(round(len(filenames["train"]) / 10)).batch(batch_size)
-        # .map(lambda x, y: (data_augmentation(x), y))
+        train_dataset.shuffle(1000)
+        .batch(batch_size)
+        .map(
+            data_augmentation,
+            num_parallel_calls=tf.data.AUTOTUNE,
+        )
         .prefetch(tf.data.AUTOTUNE)
     )
     test_dataset = test_dataset.batch(batch_size)
@@ -175,157 +207,278 @@ def create_datasets(
             np.save(f"{path_outputs}/train_example_{i}_imgs", tfds.as_numpy(x)[0])
             np.save(f"{path_outputs}/train_example_{i}_labs", tfds.as_numpy(x)[1])
             i += 1
-
+        i = 0
+        for x in test_dataset.take(5):
+            np.save(f"{path_outputs}/test_example_{i}_imgs", tfds.as_numpy(x)[0])
+            np.save(f"{path_outputs}/test_example_{i}_labs", tfds.as_numpy(x)[1])
+            i += 1
+    print("Dataset generado!")
     return train_dataset, test_dataset, filenames
 
 
-def create_and_build_datasets(
-    df, kind, image_size, resizing_size, batch_size, save_examples=True
+def get_batch_predictions(model, batch_images):
+    """Computa las predicciones del batch
+
+    Parameters:
+    -----------
+    model: tf.keras.Model, modelo entrenado
+    images: np.array con las imágenes a predecir (batch_size, img_size, img_size, bands)
+    batch_real_value: np.array con el valor real del radio censal correspondiente (batch_size)
+    metric: function, función que computa el error de predicción. Por defecto es np.mean
+    """ 
+    to_predict = tf.data.Dataset.from_tensor_slices(batch_images)
+
+    to_predict = to_predict.batch(128)
+    predictions = model.predict(to_predict)
+    predictions = predictions.flatten()
+
+    return predictions
+
+
+def compute_custom_loss(
+    model, metadata, tiles, size, resizing_size, bias, sample, to8bit, verbose=False
 ):
-    """Accepts four Pandas DataFrames: all your data, the training, validation and test DataFrames. Creates and returns
-    keras ImageDataGenerat
-    ors. Within this function you can also visualize the augmentations of the ImageDataGenerators.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Your Pandas DataFrame containing all your data.
-    train : pd.DataFrame
-        Your Pandas DataFrame containing your training data.
-    val : pd.DataFrame
-        Your Pandas DataFrame containing your validation data.
-    test : pd.DataFrame
-        Your Pandas DataFrame containing your testing data.
-
-    Returns
-    -------
-    Tuple[tf.Dataset, tf.Dataset, tf.Dataset, dict]
-        A tuple containing the training, validation and test datasets, and a dictionary with each dataset's filepaths.
     """
-    import cv2
-    import skimage
-    import utils
-    import build_dataset
+    Calcula el ECM del conjunto de predicción.
 
-    variable = "ln_pred_inc_mean"
-    bias = 2
-    tiles = 2
-    actual_size = image_size // tiles * tiles
+    Carga las bases necesarias, itera sobre los radios censales, genera las imágenes
+    en forma de grilla y compara las predicciones de esas imágenes con el valor real
+    del radio censal.
 
+    Parameters:
+    -----------
+    metadata: pd.DataFrame, dataframe con los metadatos de las imágenes
+    tiles: int, cantidad de imágenes a generar por lado
+    size: int, tamaño de la imagen a generar, en píxeles
+    resizing_size: int, tamaño al que se redimensiona la imagen
+    bias: int, cantidad de píxeles que se mueve el punto aleatorio de las tiles
+    to8bit: bool, si es True, convierte la imagen a 8 bits
+
+    Returns:
+    --------
+    mse: float, error cuadrático medio del conjunto de predicción
+
+    """
+    import random
+
+    if verbose==False:
+        blockPrint()
+
+    # Inicializo arrays
+    batch_images      = np.empty((0, resizing_size, resizing_size, 4))    
+    batch_link_names  = np.empty((0))
+    batch_real_values = np.empty((0))
+    batch_predictions = np.empty((0))
+    all_link_names    = np.empty((0))
+    all_predictions   = np.empty((0))
+    all_real_values   = np.empty((0))
+    
+    # Cargar bases de datos
     datasets, extents = build_dataset.load_satellite_datasets()
-    icpag = build_dataset.load_icpag_dataset(variable)
-    icpag = build_dataset.assign_links_to_datasets(icpag, extents)
+    icpag = build_dataset.load_icpag_dataset()
+    icpag = build_dataset.assign_links_to_datasets(icpag, extents, verbose=False)
+    
+    # Filtro Radios demasiado grandes (tardan horas en generar la cuadrícula y es puro campo...)
+    icpag = icpag[icpag['AREA'] <= 4000000]  # Remove rc that are too big
+    links = (
+        metadata['link'].astype(str).str.zfill(9).unique()
+    )
+    links = [link for link in links if link in icpag.link.unique()]
+    # links = random.sample(links, 30)
+    len_links = len(links)
+    
+    # Creo la carpeta de test
+    test_folder = rf"{path_dataout}/test_size{size}_tiles{tiles}_sample{sample}"
+    os.makedirs(test_folder, exist_ok=True)
 
-    # Train, validation and test split
-    train = df[df.type == "train"]
-    test = df[df.type == "test"]
-    # test, val = train_test_split(test, test_size=0.5, shuffle=True, random_state=528)
-
-    assert pd.concat([train, test]).sort_index().equals(df)
-
-    ### Benchmarking MSE against the mean
-    print("Benchmarking MSE against the mean")
-    print("Train MSE: ", test["var"].var())
-
-    ### dataframes to tf.data.Dataset
-
-    def normalize_image(img):
-        img = np.moveaxis(
-            img, 0, 2
-        )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
-        img = cv2.resize(
-            img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
-        )
-        img = skimage.exposure.equalize_hist(img)  # stretch
-        return img
-
-    def generate_image(link, label):
-        row = icpag[icpag.link == link]
-        ds_name = row["dataset"].values[0]
-        current_ds = datasets[ds_name]
-
-        img, point, bounds, total_bounds = utils.random_image_from_census_tract(
-            current_ds, icpag, link, tiles=tiles, size=actual_size, bias=bias
-        )
-        img = normalize_image(img)
-        img = tf.convert_to_tensor(img / 255, dtype=tf.float32)
-        label = tf.cast(label, tf.float32)
-
-        return img, label
-
-    # Create tf.data pipeline for each dataset
-    datasets = []
-    links_l = []
-    for dataframe in [train, test]:
-        # Get list of links and corresponding list of labels
-        links = tf.constant(dataframe["image"].to_list())
-        if kind == "reg":
-            labels = tf.constant(dataframe["var"].to_list())
-        elif kind == "cla":
-            labels = tf.one_hot(
-                (df["var"] - 1).to_list(), 10
-            )  # Fist class corresponds to decile 1, etc.
-
-        # Create a dataset from the links and labels
-        dataset = tf.data.Dataset.from_tensor_slices((links, labels))
-        dataset = dataset.map(
-            lambda link, label: tf.numpy_function(
-                generate_image, [link, label], (tf.float32, tf.float32)
+    # Loop por radio censal. Si está la imagen la usa, sino la genera.
+    for n, link in enumerate(links):
+        print(f"{link}: {n}/{len_links}")
+        # Abre/genera la imagen
+        file = rf"{test_folder}/test_{link}.npy"
+        if os.path.isfile(file):
+            images = np.load(file)
+        else:
+            link_dataset = build_dataset.get_dataset_for_link(icpag, datasets, link)
+            images, points, bounds = build_dataset.get_gridded_images_for_link(
+                link_dataset,
+                icpag,
+                link,
+                tiles,
+                size,
+                resizing_size,
+                bias,
+                sample,
+                to8bit,
             )
-        )  # Parse every image in the dataset using `map`
-        datasets += [dataset]
+            if len(images) == 0:
+                # No images where returned from this census tract, so no error to compute...
+                continue
+            images = np.array(images)
+            np.save(file, images)
 
-        # Store links for later use
-        links_l += [dataframe["image"].to_list()]
+        # Obtener el error de estimación del radio censal
+        link_real_value = metadata.loc[metadata["link"] == int(link), "var"].values[0]
 
-    train_dataset, test_dataset = datasets
-    links = {
-        "train": links_l[0],
-        "test": links_l[1],
-    }  # , "val": links_l[2]}
+        # Agrega al batch de valores reales / imagenes para la prediccion
+        q_images = images.shape[0]            
+        link_names  = np.array([link] * q_images)
+        real_values = np.array([link_real_value] * q_images)        
+        
+        batch_images      = np.concatenate([images, batch_images], axis=0)
+        batch_link_names  = np.concatenate([link_names, batch_link_names], axis=0)
+        batch_real_values = np.concatenate([real_values, batch_real_values], axis=0)
+    
+        if batch_real_values.shape[0] > 128:
+            batch_predictions = get_batch_predictions(model, batch_images)
 
-    ### augmentations, batching and prefetching
-    # Create a data augmentation stage with horizontal flipping, rotations, zooms
-    data_augmentation = keras.Sequential(
-        [
-            layers.RandomFlip(
-                "horizontal_and_vertical",
-                seed=825,
-                input_shape=(resizing_size, resizing_size, 4),
-            ),
-            # layers.RandomRotation(0.3, fill_mode="reflect", seed=825),
-            layers.RandomTranslation(0.3, 0.3, fill_mode="reflect", seed=825),
-            # layers.RandomHeight(0.3),
-            # layers.RandomWidth(0.3), # The following are not working good. Must calibrate them!
-            layers.RandomZoom(0.3, seed=825),
-            layers.RandomContrast(0.3, seed=825),
-            layers.RandomBrightness(0.4, value_range=(0, 1), seed=825),
-            # layers.RandomCrop(image_size, image_size, seed=825),
-        ],
-        name="data_augmentation",
+            # Store data
+            all_link_names  = np.concatenate([all_link_names, batch_link_names])
+            all_predictions = np.concatenate([all_predictions, batch_predictions])
+            all_real_values = np.concatenate([all_real_values, batch_real_values]) 
+            
+            # Restore batches to empty
+            batch_images      = np.empty((0, resizing_size, resizing_size, 4))    
+            batch_link_names  = np.empty((0))
+            batch_real_values = np.empty((0))
+            batch_predictions = np.empty((0))
+
+
+    if verbose==False:
+        enablePrint()
+    
+    # Creo dataframe para exportar:
+    d = {
+        "link": all_link_names,
+        "predictions": all_predictions,
+        "real_value": all_real_values,
+    }
+    df_preds = pd.DataFrame(data=d)
+
+    df_preds['mean_prediction'] = df_preds.groupby(by="link").predictions.transform("mean")  
+    df_preds['error'] = df_preds['mean_prediction'] - df_preds['real_value']
+    df_preds['sq_error'] = df_preds['error']**2
+    mse = df_preds.drop_duplicates(subset=['link']).sq_error.mean() 
+      
+    return df_preds, mse
+
+
+def compute_custom_loss_all_epochs(
+    log_dir,
+    models_dir,
+    model_name,
+    metadata,
+    tiles,
+    size,
+    resizing_size,
+    bias,
+    sample,
+    to8bit,
+    n_epochs=20,
+):
+    """
+    Calcula el ECM del conjunto de predicción.
+
+    Carga las bases necesarias, itera sobre los radios censales, genera las imágenes
+    en forma de grilla y compara las predicciones de esas imágenes con el valor real
+    del radio censal.
+
+    Parameters:
+    -----------
+    metadata: pd.DataFrame, dataframe con los metadatos de las imágenes
+    tiles: int, cantidad de imágenes a generar por lado
+    size: int, tamaño de la imagen a generar, en píxeles
+    resizing_size: int, tamaño al que se redimensiona la imagen
+    bias: int, cantidad de píxeles que se mueve el punto aleatorio de las tiles
+    to8bit: bool, si es True, convierte la imagen a 8 bits
+
+    Returns:
+    --------
+    mse: float, error cuadrático medio del conjunto de predicción
+
+    """
+    # blockPrint()
+    mse_epochs = {epoch: 0 for epoch in range(n_epochs)}
+    models = {
+        epoch: tf.keras.models.load_model(
+            f"{models_dir}/{model_name}_{epoch}", compile=True
+        )
+        for epoch in range(n_epochs)
+    }
+    datasets, extents = build_dataset.load_satellite_datasets()
+    icpag = build_dataset.load_icpag_dataset()
+    icpag = build_dataset.assign_links_to_datasets(icpag, extents, verbose=False)
+    links = (
+        metadata.loc[metadata.type == "test", "link"].astype(str).str.zfill(9).unique()
     )
+    
+    len_links = len(links)
+    
+    test_folder = rf"{path_dataout}/test_size{size}_tiles{tiles}_sample{sample}"
+    os.makedirs(test_folder, exist_ok=True)
+    
+    for n, link in enumerate(links):
+        try:
+            file = rf"{test_folder}/test_{link}.npy"
+            if os.path.isfile(file):
+                images = np.load(file)
+            else:
+                link_dataset = build_dataset.get_dataset_for_link(icpag, datasets, link)
+                images, points, bounds = build_dataset.get_gridded_images_for_link(
+                    link_dataset,
+                    icpag,
+                    link,
+                    tiles,
+                    size,
+                    resizing_size,
+                    bias,
+                    sample,
+                    to8bit,
+                )
+                images = np.array(images)
+                np.save(file, images)
 
-    # Prepare dataset for training
-    train_dataset = (
-        train_dataset.shuffle(round(len(links["train"]) / 10)).batch(batch_size)
-        # .map(lambda x, y: (data_augmentation(x), y))
-        .prefetch(tf.data.AUTOTUNE)
-    )
-    test_dataset = test_dataset.batch(batch_size)
-    # val_dataset = val_dataset.batch(batch_size)
+            # Obtener el error de estimación del radio censal
+            link_real_value = metadata.loc[metadata["link"] == int(link), "var"].values[
+                0
+            ]
+            for epoch in range(1, n_epochs):
+                link_error = get_link_error(
+                    models[epoch], images, resizing_size, link_real_value
+                )
 
-    if save_examples == True:
-        i = 0
-        for x in train_dataset.take(5):
-            np.save(f"{path_outputs}/train_example_{i}_imgs", tfds.as_numpy(x)[0])
-            np.save(f"{path_outputs}/train_example_{i}_labs", tfds.as_numpy(x)[1])
-            i += 1
+                # Actualizar el error cuadratico medio
+                #   - Suma ponderada del error anterior y el nuevo error
+                mse_previo = mse_epochs[epoch]
+                mse_updated = (mse_previo * n + link_error**2) / (n + 1)
+                mse_epochs[epoch] = mse_updated
 
-    return train_dataset, test_dataset, links
+        except:
+            print(f"problema con link {link}...")
+            continue
+
+    # enablePrint()
+
+    for epoch in range(0, n_epochs):
+        custom_loss = mse_epochs[epoch]
+        print(f"Epoch {epoch}/{n_epochs}: True Mean Squared Error: {custom_loss}")
+
+        # Log the custom loss to TensorBoard
+        with tf.summary.create_file_writer(log_dir).as_default():
+            tf.summary.scalar("true_mean_squared_error", custom_loss, step=epoch)
 
 
 def get_callbacks(
-    model_name: str, loss: str
+    model_name: str,
+    loss: str,
+    metadata,
+    tiles,
+    size,
+    resizing_size,
+    bias=2,
+    test_sample=1,
+    to8bit=True,
+    logdir=None,
 ) -> List[Union[TensorBoard, EarlyStopping, ModelCheckpoint]]:
     """Accepts the model name as a string and returns multiple callbacks for training the keras model.
 
@@ -340,12 +493,49 @@ def get_callbacks(
         A list of multiple keras callbacks.
     """
 
-    logdir = f"{path_logs}/{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"  # create a folder for each model.
+    class CustomLossCallback(tf.keras.callbacks.Callback):
+        def __init__(self, log_dir):
+            super(CustomLossCallback, self).__init__()
+            self.log_dir = log_dir
+
+        def on_epoch_end(self, epoch, logs=None):
+            print("Calculando el verdadero ECM. Esto puede tardar un rato...")
+            # Calculate your custom loss here (replace this with your actual custom loss calculation)
+            df_prediciones, mse = compute_custom_loss(
+                self.model,
+                metadata[metadata.type == 'test'],
+                tiles,
+                size,
+                resizing_size,
+                bias,
+                test_sample,
+                to8bit,
+            )
+            print(f"True Mean Squared Error: {mse}")
+
+            # Log the custom loss to TensorBoard
+            with tf.summary.create_file_writer(self.log_dir).as_default():
+                tf.summary.scalar("true_mean_squared_error", mse, step=epoch)
+                
+            # Save model
+            savename = f"{model_name}_size{size}_tiles{tiles}_sample{test_sample}"
+            os.makedirs(f"{path_dataout}/models_by_epoch/{savename}", exist_ok=True)
+            self.model.save(
+                f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}",
+                include_optimizer=True,
+            )
+            # Save predictions
+            df_prediciones.to_csv(
+                f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}.csv"
+            )
 
     tensorboard_callback = TensorBoard(
         log_dir=logdir, histogram_freq=1, profile_batch="500,520"
     )
     # use tensorboard --logdir logs/scalars in your command line to startup tensorboard with the correct logs
+
+    # Create an instance of your custom callback
+    custom_loss_callback = CustomLossCallback(log_dir=logdir)
 
     # FIXME: Sacar esto
     # early_stopping_callback = EarlyStopping(
@@ -356,11 +546,14 @@ def get_callbacks(
     #     mode="auto",  # the model is stopped when the quantity monitored has stopped decreasing
     #     restore_best_weights=True,  # restore the best model with the lowest validation error
     # )
-
+    reduce_lr = keras.callbacks.ReduceLROnPlateau(
+        monitor="val_loss", factor=0.2, patience=10, min_lr=0.0000001
+    )
+    savename = f"{model_name}_size{size}_tiles{tiles}_sample{test_sample}"
     model_checkpoint_callback = ModelCheckpoint(
-        f"{path_dataout}/models/" + model_name + ".h5",
+        f"{path_dataout}/models/{savename}",
         monitor="val_loss",
-        verbose=0,
+        verbose=1,
         save_best_only=True,  # save the best model
         mode="auto",
         save_freq="epoch",  # save every epoch
@@ -368,8 +561,10 @@ def get_callbacks(
 
     return [
         tensorboard_callback,
+        # reduce_lr,
         # early_stopping_callback,
         model_checkpoint_callback,
+        custom_loss_callback,
     ]
 
 
@@ -377,11 +572,14 @@ def run_model(
     model_name: str,
     model_function: Model,
     lr: float,
-    train_generator: Iterator,
-    validation_generator: Iterator,
-    test_generator: Iterator,
+    train_dataset: Iterator,
+    test_dataset: Iterator,
     loss: str,
     metrics: List[str],
+    callbacks: List[Union[TensorBoard, EarlyStopping, ModelCheckpoint]],
+    model_path: str = None,
+    epochs: int = 20,
+    initial_epoch: int = 0,
 ):
     """This function runs a keras model with the Ranger optimizer and multiple callbacks. The model is evaluated within
     training through the validation generator and afterwards one final time on the test generator.
@@ -394,43 +592,63 @@ def run_model(
         Keras model function like small_cnn()  or adapt_efficient_net().
     lr : float
         Learning rate.
-    train_generator : Iterator
-        keras ImageDataGenerators for the training data.
-    validation_generator : Iterator
-        keras ImageDataGenerators for the validation data.
-    test_generator : Iterator
-        keras ImageDataGenerators for the test data.
+    train_dataset : Iterator
+        tensorflow dataset for the training data.
+    test_dataset : Iterator
+        tesorflow dataset for the test data.
+    loss: str
+        Loss function.
+    metrics: List[str]
+        List of metrics to be used.
+    model_path : str, optional
+        Path to the model if restored from previous training, by default None.
+    epochs : int, optional
+        Number of epochs to train, by default 20.
+    initial_epoch : int, optional
+        Initial epoch, by default 0. If restoring training
+
 
     Returns
     -------
     History
         The history of the keras model as a History object. To access it as a Dict, use history.history.
     """
+    import tensorflow.python.keras.backend as K
 
-    callbacks = get_callbacks(model_name, loss)
-    model = model_function
-    model.summary()
-    # keras.utils.plot_model(model, to_file=model_name + ".png", show_shapes=True)
+    if model_path is None:
+        # constructs the model and compiles it
+        model = model_function
+        model.summary()
+        # keras.utils.plot_model(model, to_file=model_name + ".png", show_shapes=True)
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-    # opt = tfa.optimizers.RectifiedAdam(learning_rate=lr)
-    # # Nesterov Accelerated Gradient (NAG)
-    # #   https://kyle-r-kieser.medium.com/tuning-your-keras-sgd-neural-network-optimizer-768536c7ef0
-    # opt = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True)  #  1=No friction
-    # optimizer = tfa.optimizers.Lookahead(opt, sync_period=6, slow_step_size=0.5)
+        optimizer = tf.keras.optimizers.Adam()
+        # opt = tfa.optimizers.RectifiedAdam(learning_rate=lr)
+        # # Nesterov Accelerated Gradient (NAG)
+        # #   https://kyle-r-kieser.medium.com/tuning-your-keras-sgd-neural-network-optimizer-768536c7ef0
+        # optimizer = tf.keras.optimizers.SGD(
+        #     learning_rate=lr, momentum=0.9, nesterov=True
+        # )  #  1=No friction
 
-    model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+        initial_epoch = 0
+    else:
+        # assert os.path.isfolder(
+        #     model_path
+        # ), "model_path must be a valid path to a model"
+        model = keras.models.load_model(model_path)  # load the model from file
+        initial_epoch = initial_epoch
+
     history = model.fit(
-        train_generator,
-        epochs=20,
-        validation_data=test_generator,  # FIXME: ¿esto esta bien?
-        shuffle=True,
+        train_dataset,
+        epochs=epochs,
+        initial_epoch=initial_epoch,
+        validation_data=test_dataset,
         callbacks=callbacks,
         workers=2,  # adjust this according to the number of CPU cores of your machine
     )
 
     model.evaluate(
-        test_generator,
+        test_dataset,
         callbacks=callbacks,
     )
     return model, history  # type: ignore
@@ -494,7 +712,7 @@ def set_model_and_loss_function(
         "small_cnn": custom_models.small_cnn(resizing_size),  # kind=kind),
         "mobnet_v3": custom_models.mobnet_v3(resizing_size, kind=kind, weights=weights),
         # "resnet152_v2": custom_models.resnet152_v2(kind=kind, weights=weights),
-        "effnet_v2_b0": custom_models.effnet_v2_b0(kind=kind, weights=weights),
+        "effnet_v2_b2": custom_models.effnet_v2_b2(kind=kind, weights=weights),
         "effnet_v2_s": custom_models.effnet_v2_s(kind=kind, weights=weights),
         "effnet_v2_l": custom_models.effnet_v2_l(kind=kind, weights=weights),
         # "effnet_b0": custom_models.effnet_b0(kind=kind, weights=weights),
@@ -537,9 +755,12 @@ def run(
     weights=None,
     image_size=512,
     resizing_size=200,
+    tiles=1,
     sample_size=10,
     small_sample=False,
-    checkpoint=None,
+    n_epochs=100,
+    initial_epoch=0,
+    model_path=None,
 ):
     """Run all the code of this file.
 
@@ -548,6 +769,8 @@ def run(
     small_sample : bool, optional
         If you just want to check if the code is working, set small_sample to True, by default False
     """
+    log_dir = f"{path_logs}/{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
     ### Set Model & loss function
     model, loss, metrics = set_model_and_loss_function(
         model_name=model_name,
@@ -557,17 +780,23 @@ def run(
         weights=weights,
     )
 
+    print("Reading dataset...")
     # Open dataframe with files and labels
     df = pd.read_csv(
-        rf"{path_dataout}/size{image_size}_sample{sample_size}/metadata.csv"
+        rf"{path_dataout}/train_size{image_size}_tiles{tiles}_sample{sample_size}/metadata.csv"
     )
+    print("Dataset loaded!")
 
+    print("Cleaning dataset...")
     # Clean dataframe and create datasets
+    # df = df[df["sample"] <= 2]
     df = df.dropna(how="any").reset_index(drop=True)
     if small_sample:
-        df = df.sample(500, random_state=825).reset_index(drop=True)
-    assert all([os.path.isfile(img) for img in df.image.values])
+        df = df.sample(2000, random_state=825).reset_index(drop=True)
 
+    # assert all([os.path.isfile(img) for img in df.image.values])
+
+    print("Moving dataset to tensorflow ds...")
     train_dataset, test_dataset, filenames = create_datasets(
         df=df,
         kind=kind,
@@ -578,15 +807,29 @@ def run(
     val_dataset = [0]
 
     # Run model
+    callbacks = get_callbacks(
+        model_name,
+        loss,
+        metadata=df,
+        tiles=1,
+        size=image_size,
+        resizing_size=resizing_size,
+        test_sample=1,
+        logdir=log_dir,
+    )
+
     model, history = run_model(
         model_name=model_name,
         model_function=model,
-        lr=0.00001,  # lr=0.00005 para v0
-        train_generator=train_dataset,
-        validation_generator=val_dataset,
-        test_generator=test_dataset,
+        lr=0.0001,  # lr=0.00009 para mobnet_v3_20230823-141458
+        train_dataset=train_dataset,
+        test_dataset=test_dataset,
         loss=loss,
         metrics=metrics,
+        callbacks=callbacks,
+        epochs=n_epochs,
+        initial_epoch=initial_epoch,
+        model_path=model_path,
     )
 
     predicted_array = prediction_tools.get_predicted_values(
@@ -601,14 +844,32 @@ def run(
         "pred": predicted_array.flatten(),
     }
     df_prediciones = pd.DataFrame(data=d)
-    print("Correlation matrix:", df_prediciones[["real", "pred"]].corr())
+    print("R2 matrix:", df_prediciones[["real", "pred"]].corr() ** 2)
     df_prediciones.to_parquet(
-        f"{path_dataout}/preds_{model_name}_{pred_variable}.parquet"
+        f"{path_dataout}/preds_{pred_variable}_{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}.parquet"
     )
 
     # Genero gráficos de predicciones en el set de prueba
     g = plot_predictions_vs_real(df_prediciones)
-    g.savefig(rf"{path_dataout}/scatterplot_{pred_variable}_{model_name}.png", dpi=300)
+    g.savefig(
+        rf"{path_dataout}/scatterplot_{pred_variable}_{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}.png",
+        dpi=300,
+    )
+
+    # Evaluate model in test dataset
+    compute_custom_loss_all_epochs(
+        log_dir=log_dir,
+        models_dir=f"{path_dataout}/models_by_epoch",
+        model_name=model_name,
+        metadata=df,
+        size=image_size,
+        resizing_size=resizing_size,
+        tiles=1,
+        bias=2,
+        sample=1,
+        to8bit=True,
+        n_epochs=n_epochs,
+    )
 
 
 if __name__ == "__main__":
@@ -672,5 +933,6 @@ if __name__ == "__main__":
             image_size=image_size,
             sample_size=sample_size,
             small_sample=True,
+            tiles=tiles,
             weights="imagenet",
         )

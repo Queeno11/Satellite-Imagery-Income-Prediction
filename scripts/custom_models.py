@@ -12,8 +12,10 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.applications import (
     MobileNetV2,
     MobileNetV3Small,
+    Xception,
+    MobileNetV3Large,
     EfficientNetB0,
-    EfficientNetV2B0,
+    EfficientNetV2B3,
     EfficientNetV2S,
     EfficientNetV2L,
     ResNet152V2,
@@ -46,7 +48,23 @@ def rebuild_top(model_base, kind="cla") -> Sequential:
 def mobnet_v3(resizing_size, kind="reg", weights=None) -> Sequential:
     """https://keras.io/api/applications/mobilenet_v3/#mobilenetv3small-function"""
 
-    model_base = MobileNetV3Small(
+    model_base = MobileNetV3Large(
+        include_top=False,
+        input_shape=(resizing_size, resizing_size, 4),
+        weights=None,
+        include_preprocessing=False,
+    )
+    if weights is not None:
+        model_base.trainable = False
+
+    model = rebuild_top(model_base, kind=kind)
+    return model
+
+
+def xception(resizing_size, kind="reg", weights=None) -> Sequential:
+    """https://keras.io/api/applications/xception/#xception-function"""
+
+    model_base = Xception(
         include_top=False,
         input_shape=(resizing_size, resizing_size, 4),
         weights=weights,
@@ -85,7 +103,7 @@ def effnet_b0(kind="reg", weights=None) -> Sequential:
 
     model_base = EfficientNetB0(
         include_top=False,
-        input_shape=(224, 224, 3),
+        input_shape=(200, 200, 3),
         weights=weights,
         include_preprocessing=True,
     )
@@ -96,10 +114,10 @@ def effnet_b0(kind="reg", weights=None) -> Sequential:
     return model
 
 
-def effnet_v2_b0(kind="reg", weights=None) -> Sequential:
+def effnet_v2_b2(kind="reg", weights=None) -> Sequential:
     """https://keras.io/api/applications/efficientnet_v2/#efficientnetv2s-function"""
 
-    model_base = EfficientNetV2B0(
+    model_base = EfficientNetV2B3(
         include_top=False,
         input_shape=(224, 224, 3),
         weights=weights,
@@ -117,7 +135,7 @@ def effnet_v2_s(kind="reg", weights=None) -> Sequential:
 
     model_base = EfficientNetV2S(
         include_top=False,
-        input_shape=(224, 224, 3),
+        input_shape=(128, 128, 3),
         weights=weights,
         include_preprocessing=True,
     )
@@ -161,7 +179,14 @@ def small_cnn(resizing_size=200) -> Sequential:
 
     model = models.Sequential()
 
-    model.add(layers.Conv2D(32, (3, 3), activation="linear", input_shape=(resizing_size, resizing_size, 4)))
+    model.add(
+        layers.Conv2D(
+            32,
+            (3, 3),
+            activation="linear",
+            input_shape=(resizing_size, resizing_size, 4),
+        )
+    )
     model.add(layers.BatchNormalization())
     model.add(layers.Activation("relu"))
     model.add(layers.MaxPooling2D((2, 2)))
