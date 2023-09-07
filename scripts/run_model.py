@@ -56,11 +56,13 @@ tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 # Disable
 def blockPrint():
+    sys.__stdout__ = sys.stdout
     sys.stdout = open(os.devnull, "w")
 
 
 # Restore
 def enablePrint():
+    sys.stdout.close()
     sys.stdout = sys.__stdout__
 
 
@@ -282,7 +284,7 @@ def compute_custom_loss(
         metadata['link'].astype(str).str.zfill(9).unique()
     )
     links = [link for link in links if link in icpag.link.unique()]
-    links = random.sample(links, 30)
+    # links = random.sample(links, 30)
     len_links = len(links)
     
     # Creo la carpeta de test
@@ -516,12 +518,16 @@ def get_callbacks(
                 tf.summary.scalar("true_mean_squared_error", mse, step=epoch)
                 
             # Save model
+            savename = f"{model_name}_size{size}_tiles{tiles}_sample{test_sample}"
+            os.makedirs(f"{path_dataout}/models_by_epoch/{savename}", exist_ok=True)
             self.model.save(
-                f"{path_dataout}/models_by_epoch/{model_name}_{epoch}",
+                f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}",
                 include_optimizer=True,
             )
             # Save predictions
-            df_prediciones.to_csv(f"{path_dataout}/models_by_epoch/{model_name}_{epoch}.csv")
+            df_prediciones.to_csv(
+                f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}.csv"
+            )
 
     tensorboard_callback = TensorBoard(
         log_dir=logdir, histogram_freq=1, profile_batch="500,520"
@@ -543,12 +549,12 @@ def get_callbacks(
     reduce_lr = keras.callbacks.ReduceLROnPlateau(
         monitor="val_loss", factor=0.2, patience=10, min_lr=0.0000001
     )
-
+    savename = f"{model_name}_size{size}_tiles{tiles}_sample{test_sample}"
     model_checkpoint_callback = ModelCheckpoint(
-        f"{path_dataout}/models/{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+        f"{path_dataout}/models/{savename}",
         monitor="val_loss",
         verbose=1,
-        save_best_only=False,  # save the best model
+        save_best_only=True,  # save the best model
         mode="auto",
         save_freq="epoch",  # save every epoch
     )  # saving eff_net takes quite a bit of time

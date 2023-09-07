@@ -27,7 +27,7 @@ run(
     model_name=model,
     pred_variable=variable,
     kind=kind,
-    small_sample=True,
+    small_sample=False,
     weights=None,
     image_size=image_size,
     sample_size=sample_size,
