@@ -75,18 +75,24 @@ def load_icpag_dataset(variable="ln_pred_inc_mean"):
     return icpag
 
 
-def assign_links_to_datasets(icpag, extents):
+def assign_links_to_datasets(icpag, extents, verbose=True):
     """Assign each link a dataset if the census tract falls within the extent of the dataset (images)"""
+    import warnings
+
+    warnings.filterwarnings("ignore")
 
     for name, bbox in extents.items():
         icpag.loc[icpag.centroid.within(bbox), "dataset"] = name
 
-    print("Links without images:", icpag.dataset.isna().sum(), "out of", len(icpag))
-
+    nan_links = icpag.dataset.isna().sum()
     icpag = icpag[icpag.dataset.notna()]
 
-    icpag.plot()
-    plt.savefig(rf"{path_dataout}/links_with_images.png")
+    if verbose:
+        print("Links without images:", nan_links, "out of", len(icpag))
+        icpag.plot()
+        plt.savefig(rf"{path_dataout}/links_with_images.png")
+
+    warnings.filterwarnings("default")
 
     return icpag
 
@@ -191,6 +197,24 @@ def assert_train_test_datapoint(point, bounds, wanted_type="train"):
     return istype
 
 
+def get_dataset_for_link(icpag, datasets, link):
+    """Get dataset where the census tract is located.
+
+    Parameters
+    ----------
+    - icpag: geopandas.GeoDataFrame, shapefile with the census tracts
+    - datasets: dict, dictionary with the satellite datasets. Names of the datasets are the keys and xarray.Datasets are the values.
+    - link: str, 9 digits that identify the census tract
+
+    Returns
+    -------
+    - current_ds: xarray.Dataset, dataset where the census tract is located
+    """
+    current_ds_name = icpag.loc[icpag.link == link, "dataset"].values[0]
+    current_ds = datasets[current_ds_name]
+    return current_ds
+
+
 def build_dataset(
     image_size, sample_size, tiles=1, bias=2, variable="ln_pred_inc_mean"
 ):
@@ -212,15 +236,15 @@ def build_dataset(
     icpag = assign_links_to_datasets(icpag, extents)
 
     # Create output folders
-    os.makedirs(rf"{path_dataout}/size{image_size}_sample{sample_size}", exist_ok=True)
+    train_path = rf"{path_dataout}/train_size{image_size}_tiles{tiles}_sample{sample_size}"
+    os.makedirs(train_path, exist_ok=True)
 
     # Generate images
     print("Generando imágenes...")
     metadata = {}
     actual_size = image_size // tiles * tiles
     for link in tqdm(icpag.link.unique()):
-        current_ds_name = icpag.loc[icpag.link == link, "dataset"].values[0]
-        current_ds = datasets[current_ds_name]
+        link_dataset = get_dataset_for_link(icpag, datasets, link)
 
         for n in range(sample_size):
             # FIXME: algo se rompe con n=2... por qué?
@@ -229,12 +253,12 @@ def build_dataset(
             img = np.zeros((4, 2, 2))
 
             path_image = (
-                rf"{path_dataout}/size{image_size}_sample{sample_size}/{name}.npy"
+                rf"{train_path}/{name}.npy"
             )
 
             # The image could be in the border of the dataset, so we need to try again until we get a valid image
             img, point, bounds, total_bounds = utils.random_image_from_census_tract(
-                current_ds, icpag, link, tiles=tiles, size=actual_size, bias=bias
+                link_dataset, icpag, link, tiles=tiles, size=actual_size, bias=bias
             )
 
             metadata[name] = {
@@ -265,11 +289,106 @@ def build_dataset(
     metadata = split_train_test(metadata)
 
     # Export
-    path_metadata = rf"{path_dataout}/size{image_size}_sample{sample_size}/metadata.csv"
+    path_metadata = rf"{train_path}/metadata.csv"
     metadata.to_csv(path_metadata)
     print(
-        f"Se creó {path_metadata} y las imágenes para correr el modelo: size{image_size}_sample{sample_size}."
+        f"Se creó {path_metadata} y las imágenes para correr el modelo: train_size{image_size}_tiles{tiles}_sample{sample_size}."
     )
+
+
+def crop_dataset_to_link(ds, icpag, link):
+    # obtengo el poligono correspondiente al link
+    gdf_slice = icpag.loc[icpag["link"] == link]
+    # Get bounds of the shapefile's polygon
+    bbox_img = gdf_slice.bounds
+
+    # Filter dataset based on the bounds of the shapefile's polygon
+    image_ds = ds.sel(
+        x=slice(float(bbox_img["minx"]), float(bbox_img["maxx"])),
+        y=slice(float(bbox_img["maxy"]), float(bbox_img["miny"])),
+    )
+    return image_ds
+
+
+def get_gridded_images_for_link(
+    ds, icpag, link, tiles, size, resizing_size, bias, sample, to8bit
+):
+    """
+    Itera sobre el bounding box del poligono del radio censal, tomando imagenes de tamño sizexsize
+    Si dicha imagen se encuentra dentro del polinogo, se genera el composite con dicha imagen mas otras tiles**2 -1 imagenes
+    Devuelve un array con todas las imagenes generadas, un array con los puntos centrales de cada imagen y un array con los bounding boxes de cada imagen.
+
+    Parameters:
+    -----------
+    ds: xarray.Dataset, dataset con las imágenes de satélite
+    icpag: geopandas.GeoDataFrame, shapefile con los radios censales
+    link: str, 9 dígitos que identifican el radio censal
+    tiles: int, cantidad de imágenes a generar por lado
+    size: int, tamaño de la imagen a generar, en píxeles
+    resizing_size: int, tamaño al que se redimensiona la imagen
+    bias: int, cantidad de píxeles que se mueve el punto aleatorio de las tiles
+    sample: int, cantidad de imágenes a generar por box (util cuando tiles > 1)
+    to8bit: bool, si es True, convierte la imagen a 8 bits
+
+    Returns:
+    --------
+    images: list, lista con las imágenes generadas
+    points: list, lista con los puntos centrales de cada imagen
+    bounds: list, lista con los bounding boxes de cada imagen
+    """
+    # FIXME: algunos radios censales no se generan bien. Ejemplo: 065150101. ¿Que pasa ahi?
+    images = []
+    points = []
+    bounds = []
+    tile_size = size // tiles
+    tiles_generated = 0
+
+    link_dataset = crop_dataset_to_link(ds, icpag, link)
+    # FIXME: add margin to the bounding box so left and bottom tiles are not cut. Margin should be the size of the tile - 1
+    link_geometry = icpag.loc[icpag["link"] == link, "geometry"].values[0]
+
+    # Iterate over the center points of each image:
+    # - Start point is the center of the image (tile_size / 2, start_index)
+    # - End point is the maximum possible center point (link_dataset.y.size)
+    # - Step is the size of each image (tile_size)
+    start_index = int(tile_size / 2)
+    for idy in range(start_index, link_dataset.y.size, tile_size):
+        # Iterate over columns
+        for idx in range(start_index, link_dataset.x.size, tile_size):
+            # Get the center point of the image
+            image_point = (float(link_dataset.x[idx]), float(link_dataset.y[idy]))
+            point_geom = sg.Point(image_point)
+
+            # Check if the centroid of the image is within the original polygon:
+            #   - if it is, then generate the n images
+            if link_geometry.contains(point_geom):  # or intersects
+                number_imgs = 0
+                counter = 0 # Limit the times to try to sample the images
+                while (number_imgs < sample) & (counter < sample*2):
+
+                    img, point, bound, tbound = utils.random_image_from_census_tract(
+                        ds,
+                        icpag,
+                        link,
+                        start_point=image_point,
+                        tiles=tiles,
+                        size=size,
+                        bias=bias,
+                        to8bit=to8bit,
+                    )
+                    
+                    counter += 1 
+                    
+                    if img is not None:
+                        # TODO: add a check to see if the image is contained in test bounds
+                        img = utils.process_image(img, resizing_size)
+
+                        images += [img]
+                        points += [point]
+                        bounds += [bound]
+                        number_imgs += 1
+
+    return images, points, bounds
 
 
 if __name__ == "__main__":

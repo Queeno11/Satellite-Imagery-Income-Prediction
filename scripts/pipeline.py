@@ -7,8 +7,8 @@ from run_model import run
 ## Visualizar data augmentation
 
 ### PARAMETERS ###
-image_size = 512
-sample_size = 5
+image_size = 128
+sample_size = 10
 resizing_size = 128
 tiles = 1
 
@@ -18,9 +18,9 @@ model = "mobnet_v3"
 
 # Step 1: Run Pansharpening in QGIS to get the images in high resolution
 # Step 2: Run build_dataset to generate the dataset (npy files and metadata.csv)
-# build_dataset(
-#     image_size=image_size, sample_size=sample_size, variable=variable, tiles=tiles
-# )
+build_dataset(
+    image_size=image_size, sample_size=sample_size, variable=variable, tiles=tiles
+)
 
 # Step 3: Train the Model
 run(
@@ -32,4 +32,8 @@ run(
     image_size=image_size,
     sample_size=sample_size,
     resizing_size=resizing_size,
+    tiles=tiles,
+    n_epochs=50,
+    initial_epoch=0,
+    model_path=None,
 )
