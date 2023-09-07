@@ -214,30 +214,23 @@ def create_datasets(
     return train_dataset, test_dataset, filenames
 
 
-def get_link_error(model, images, link_real_value, metric=np.mean):
-    """Computa el error de predicción medio de un radio censal
+def get_batch_predictions(model, batch_images):
+    """Computa las predicciones del batch
 
     Parameters:
     -----------
     model: tf.keras.Model, modelo entrenado
-    images: list, lista con las imágenes a predecir
-    link_real_value: float, valor real del radio censal
+    images: np.array con las imágenes a predecir (batch_size, img_size, img_size, bands)
+    batch_real_value: np.array con el valor real del radio censal correspondiente (batch_size)
     metric: function, función que computa el error de predicción. Por defecto es np.mean
     """ 
-    to_predict = tf.data.Dataset.from_tensor_slices(images)
+    to_predict = tf.data.Dataset.from_tensor_slices(batch_images)
 
-    if len(images) < 64:
-        to_predict = to_predict.batch(len(images))
-        predictions = model.predict(to_predict)
-    else:
-        to_predict = to_predict.batch(64)
-        predictions = model.predict(to_predict)
-        predictions = predictions.flatten()
+    to_predict = to_predict.batch(128)
+    predictions = model.predict(to_predict)
+    predictions = predictions.flatten()
 
-    mean_prediction = predictions.mean()
-    error = mean_prediction - link_real_value
-
-    return error, mean_prediction, predictions
+    return predictions
 
 
 def compute_custom_loss(
@@ -269,28 +262,37 @@ def compute_custom_loss(
     if verbose==False:
         blockPrint()
 
-    mse = 0
-    link_names = []
-    link_errors = []
-    link_mean_predicts = []
-    link_predicts = []
+    # Inicializo arrays
+    batch_images      = np.empty((0, resizing_size, resizing_size, 4))    
+    batch_link_names  = np.empty((0))
+    batch_real_values = np.empty((0))
+    batch_predictions = np.empty((0))
+    all_link_names    = np.empty((0))
+    all_predictions   = np.empty((0))
+    all_real_values   = np.empty((0))
     
+    # Cargar bases de datos
     datasets, extents = build_dataset.load_satellite_datasets()
     icpag = build_dataset.load_icpag_dataset()
     icpag = build_dataset.assign_links_to_datasets(icpag, extents, verbose=False)
+    
+    # Filtro Radios demasiado grandes (tardan horas en generar la cuadrícula y es puro campo...)
     icpag = icpag[icpag['AREA'] <= 4000000]  # Remove rc that are too big
     links = (
         metadata['link'].astype(str).str.zfill(9).unique()
     )
     links = [link for link in links if link in icpag.link.unique()]
-    
+    links = random.sample(links, 30)
     len_links = len(links)
     
+    # Creo la carpeta de test
     test_folder = rf"{path_dataout}/test_size{size}_tiles{tiles}_sample{sample}"
     os.makedirs(test_folder, exist_ok=True)
 
+    # Loop por radio censal. Si está la imagen la usa, sino la genera.
     for n, link in enumerate(links):
         print(f"{link}: {n}/{len_links}")
+        # Abre/genera la imagen
         file = rf"{test_folder}/test_{link}.npy"
         if os.path.isfile(file):
             images = np.load(file)
@@ -312,35 +314,51 @@ def compute_custom_loss(
                 continue
             images = np.array(images)
             np.save(file, images)
-            
+
         # Obtener el error de estimación del radio censal
         link_real_value = metadata.loc[metadata["link"] == int(link), "var"].values[0]
-        error, mean_prediction, predictions = get_link_error(model, images, link_real_value)
 
-        # Store data
-        link_names += [link]
-        link_errors += [error]
-        link_mean_predicts += [mean_prediction]
-        link_predicts += [predictions]
+        # Agrega al batch de valores reales / imagenes para la prediccion
+        q_images = images.shape[0]            
+        link_names  = np.array([link] * q_images)
+        real_values = np.array([link_real_value] * q_images)        
         
-        # Actualizar el error cuadratico medio
-        #   - Suma ponderada del error anterior y el nuevo error
-        mse = (mse * n + error**2) / (n + 1)
+        batch_images      = np.concatenate([images, batch_images], axis=0)
+        batch_link_names  = np.concatenate([link_names, batch_link_names], axis=0)
+        batch_real_values = np.concatenate([real_values, batch_real_values], axis=0)
+    
+        if batch_real_values.shape[0] > 128:
+            batch_predictions = get_batch_predictions(model, batch_images)
+
+            # Store data
+            all_link_names  = np.concatenate([all_link_names, batch_link_names])
+            all_predictions = np.concatenate([all_predictions, batch_predictions])
+            all_real_values = np.concatenate([all_real_values, batch_real_values]) 
+            
+            # Restore batches to empty
+            batch_images      = np.empty((0, resizing_size, resizing_size, 4))    
+            batch_link_names  = np.empty((0))
+            batch_real_values = np.empty((0))
+            batch_predictions = np.empty((0))
+
 
     if verbose==False:
         enablePrint()
     
     # Creo dataframe para exportar:
     d = {
-        "link": link_names,
-        "error": link_errors,
-        "mean_prediction": link_mean_predicts,
-        "predictions": link_predicts,
-        "real_value": link_real_value,
+        "link": all_link_names,
+        "predictions": all_predictions,
+        "real_value": all_real_values,
     }
-    df_prediciones = pd.DataFrame(data=d)
-    
-    return df_prediciones, mse
+    df_preds = pd.DataFrame(data=d)
+
+    df_preds['mean_prediction'] = df_preds.groupby(by="link").predictions.transform("mean")  
+    df_preds['error'] = df_preds['mean_prediction'] - df_preds['real_value']
+    df_preds['sq_error'] = df_preds['error']**2
+    mse = df_preds.drop_duplicates(subset=['link']).sq_error.mean() 
+      
+    return df_preds, mse
 
 
 def compute_custom_loss_all_epochs(

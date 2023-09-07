@@ -18,16 +18,16 @@ model = "mobnet_v3"
 
 # Step 1: Run Pansharpening in QGIS to get the images in high resolution
 # Step 2: Run build_dataset to generate the dataset (npy files and metadata.csv)
-build_dataset(
-    image_size=image_size, sample_size=sample_size, variable=variable, tiles=tiles
-)
+# build_dataset(
+#     image_size=image_size, sample_size=sample_size, variable=variable, tiles=tiles
+# )
 
 # Step 3: Train the Model
 run(
     model_name=model,
     pred_variable=variable,
     kind=kind,
-    small_sample=False,
+    small_sample=True,
     weights=None,
     image_size=image_size,
     sample_size=sample_size,
