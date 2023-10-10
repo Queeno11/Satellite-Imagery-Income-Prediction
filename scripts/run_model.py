@@ -8,9 +8,10 @@ from typing import List, Dict
 from dotenv import dotenv_values
 
 pd.set_option("display.max_columns", None)
-try:
-    env = dotenv_values("/mnt/d/Maestría/Tesis/Repo/scripts/globals.env")
-except:
+envpath = "/mnt/d/Maestría/Tesis/Repo/scripts/globals.env"
+if os.path.isfile(envpath):
+    env = dotenv_values(envpath)
+else:
     env = dotenv_values(r"D:/Maestría/Tesis/Repo/scripts/globals_win.env")
 
 path_proyecto = env["PATH_PROYECTO"]
@@ -55,6 +56,7 @@ try:
     tf.config.experimental.set_memory_growth(physical_devices[0], True)
 except:
     print("No GPU set. Is the GPU already initialized?")
+
 
 # Disable
 def blockPrint():
@@ -312,7 +314,7 @@ def compute_custom_loss(
             print("Generando...")
             link_dataset = build_dataset.get_dataset_for_link(icpag, datasets, link)
             print("listo")
-            if tiles==1:
+            if tiles == 1:
                 images, points, bounds = build_dataset.get_gridded_images_for_link(
                     link_dataset,
                     icpag,
@@ -324,17 +326,17 @@ def compute_custom_loss(
                     sample,
                     to8bit,
                 )
-            else: # If tiles >2 then the dataset is too big
+            else:  # If tiles >2 then the dataset is too big
                 images, points, bounds = build_dataset.get_random_images_for_link(
-                    link_dataset, 
-                    icpag, 
-                    link, 
-                    tiles, 
+                    link_dataset,
+                    icpag,
+                    link,
+                    tiles,
                     size,
-                    resizing_size, 
-                    bias, 
-                    sample, 
-                    to8bit
+                    resizing_size,
+                    bias,
+                    sample,
+                    to8bit,
                 )
             print("imagen generada")
             if len(images) == 0:
