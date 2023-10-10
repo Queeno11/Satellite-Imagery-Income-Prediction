@@ -15,7 +15,7 @@ envpath = r"/mnt/d/Maestría/Tesis/Repo/scripts/globals.env"
 if os.path.isfile(envpath):
     env = dotenv_values(envpath)
 else:
-    env = dotenv_values(r"D:/Maestría/Tesis/Repo/scripts/globals_win.env")
+    env = dotenv_values(r"D:\Maestría\Tesis\Repo\scripts\globals_win.env")
 
 path_datain = env["PATH_DATAIN"]
 path_dataout = env["PATH_DATAOUT"]
