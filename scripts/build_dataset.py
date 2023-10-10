@@ -23,7 +23,6 @@ path_scripts = env["PATH_SCRIPTS"]
 path_satelites = env["PATH_SATELITES"]
 path_logs = env["PATH_LOGS"]
 path_outputs = env["PATH_OUTPUTS"]
-path_imgs = env["PATH_IMGS"]
 # path_programas  = globales[7]
 
 import affine
@@ -237,7 +236,7 @@ def build_dataset(
     icpag = assign_links_to_datasets(icpag, extents)
 
     # Create output folders
-    train_path = rf"{path_imgs}/train_size{image_size}_tiles{tiles}_sample{sample_size}"
+    train_path = rf"{path_dataout}/train_size{image_size}_tiles{tiles}_sample{sample_size}"
     os.makedirs(train_path, exist_ok=True)
 
     # Generate images
@@ -253,7 +252,9 @@ def build_dataset(
 
             img = np.zeros((4, 2, 2))
 
-            path_image = rf"{train_path}/{name}.npy"
+            path_image = (
+                rf"{train_path}/{name}.npy"
+            )
 
             # The image could be in the border of the dataset, so we need to try again until we get a valid image
             img, point, bounds, total_bounds = utils.random_image_from_census_tract(
@@ -362,8 +363,9 @@ def get_gridded_images_for_link(
             #   - if it is, then generate the n images
             if link_geometry.contains(point_geom):  # or intersects
                 number_imgs = 0
-                counter = 0  # Limit the times to try to sample the images
-                while (number_imgs < sample) & (counter < sample * 2):
+                counter = 0 # Limit the times to try to sample the images
+                while (number_imgs < sample) & (counter < sample*2):
+
                     img, point, bound, tbound = utils.random_image_from_census_tract(
                         ds,
                         icpag,
@@ -374,10 +376,9 @@ def get_gridded_images_for_link(
                         bias=bias,
                         to8bit=to8bit,
                     )
-
-                    counter += 1
-                    print(counter)
-
+                    
+                    counter += 1 
+                    
                     if img is not None:
                         # TODO: add a check to see if the image is contained in test bounds
                         img = utils.process_image(img, resizing_size)
@@ -387,367 +388,7 @@ def get_gridded_images_for_link(
                         bounds += [bound]
                         number_imgs += 1
 
-                    else:
-                        print("Image failed")
     return images, points, bounds
-
-
-def get_gridded_images_for_dataset(
-    model, ds, icpag, tiles, size, resizing_size, bias, sample, to8bit
-):
-    """
-    Itera sobre el bounding box de un dataset (raster de imagenes), tomando imagenes de tamño sizexsize
-    Asigna el valor "real" del radio censal al que pertenece el centroide de la imagen.
-    Devuelve un array con todas las imagenes generadas, un array con los puntos centrales de cada imagen,
-    un array con los valores "reales" de los radios censales y un array con los bounding boxes de cada imagen.
-
-    Parameters:
-    -----------
-    ds: xarray.Dataset, dataset con las imágenes de satélite
-    icpag: geopandas.GeoDataFrame, shapefile con los radios censales
-    tiles: int, cantidad de imágenes a generar por lado
-    size: int, tamaño de la imagen a generar, en píxeles
-    resizing_size: int, tamaño al que se redimensiona la imagen
-    bias: int, cantidad de píxeles que se mueve el punto aleatorio de las tiles
-    sample: int, cantidad de imágenes a generar por box (util cuando tiles > 1)
-    to8bit: bool, si es True, convierte la imagen a 8 bits
-
-    Returns:
-    --------
-    images: list, lista con las imágenes generadas
-    points: list, lista con los puntos centrales de cada imagen
-    bounds: list, lista con los bounding boxes de cada imagen
-    """
-    import run_model
-    from shapely.geometry import Polygon
-
-    # FIXME: algunos radios censales no se generan bien. Ejemplo: 065150101. ¿Que pasa ahi?
-    # Inicializo arrays
-    batch_images = np.empty((0, resizing_size, resizing_size, 4))
-    batch_link_names = np.empty((0))
-    batch_predictions = np.empty((0))
-    batch_real_values = np.empty((0))
-    batch_bounds = np.empty((0))
-    all_link_names = np.empty((0))
-    all_predictions = np.empty((0))
-    all_real_values = np.empty((0))
-    all_bounds = np.empty((0))
-
-    tile_size = size // tiles
-    tiles_generated = 0
-
-    # Iterate over the center points of each image:
-    # - Start point is the center of the image (tile_size / 2, start_index)
-    # - End point is the maximum possible center point (link_dataset.y.size)
-    # - Step is the size of each image (tile_size)
-
-    # FIXME: para mejorar la eficiencia, convendría hacer un dissolve de icpag y verificar que
-    # point_geom este en ese polygono y no en todo el df
-    start_index = int(tile_size / 2)
-    for idy in range(start_index, ds.y.size, tile_size):
-        # Iterate over columns
-        for idx in range(start_index, ds.x.size, tile_size):
-            # Get the center point of the image
-            image_point = (float(ds.x[idx]), float(ds.y[idy]))
-            point_geom = sg.Point(image_point)
-
-            # Get data for selected point
-            radio_censal = icpag.loc[icpag.contains(point_geom)]
-            if radio_censal.empty:
-                # El radio censal no existe, es el medio del mar...
-                continue
-
-            real_value = radio_censal["var"].values[0]
-            link_name = radio_censal["link"].values[0]
-
-            # Check if the centroid of the image is within the original polygon:
-            #   - if it is, then generate the n images
-
-            image, point, bound, tbound = utils.random_image_from_census_tract(
-                ds,
-                icpag,
-                link_name,
-                start_point=image_point,
-                tiles=tiles,
-                size=size,
-                bias=bias,
-                to8bit=to8bit,
-            )
-
-            if image is not None:
-                image = utils.process_image(image, resizing_size)
-                geom_bound = Polygon(
-                    bound[0]
-                )  # Create polygon of the shape of the image
-
-                batch_images = np.concatenate([batch_images, np.array([image])], axis=0)
-                batch_link_names = np.concatenate(
-                    [batch_link_names, np.array([link_name])], axis=0
-                )
-                batch_real_values = np.concatenate(
-                    [batch_real_values, np.array([real_value])], axis=0
-                )
-                batch_bounds = np.concatenate(
-                    [batch_bounds, np.array([geom_bound])], axis=0
-                )
-
-                # predict with the model over the batch
-                if batch_images.shape[0] == 128:
-                    # predictions
-                    batch_predictions = run_model.get_batch_predictions(
-                        model, batch_images
-                    )
-
-                    # Store data
-                    all_predictions = np.concatenate(
-                        [all_predictions, batch_predictions], axis=0
-                    )
-                    all_link_names = np.concatenate(
-                        [all_link_names, batch_link_names], axis=0
-                    )
-                    all_real_values = np.concatenate(
-                        [all_real_values, batch_real_values], axis=0
-                    )
-                    all_bounds = np.concatenate([all_bounds, batch_bounds], axis=0)
-
-                    # Restore batches to empty
-                    batch_images = np.empty((0, resizing_size, resizing_size, 4))
-                    batch_predictions = np.empty((0))
-                    batch_link_names = np.empty((0))
-                    batch_predictions = np.empty((0))
-                    batch_real_values = np.empty((0))
-                    batch_bounds = np.empty((0))
-
-    # Creo dataframe para exportar:
-    d = {
-        "link": all_link_names,
-        "predictions": all_predictions,
-        "real_value": all_real_values,
-    }
-
-    df_preds = gpd.GeoDataFrame(d, geometry=all_bounds, crs="epsg:4326")
-
-    return df_preds
-
-
-def get_gridded_images_for_grid(
-    model, ds, icpag, tiles, size, resizing_size, bias, sample, to8bit
-):
-    """
-    Itera sobre el bounding box de un dataset (raster de imagenes), tomando imagenes de tamño sizexsize
-    Asigna el valor "real" del radio censal al que pertenece el centroide de la imagen.
-    Devuelve un array con todas las imagenes generadas, un array con los puntos centrales de cada imagen,
-    un array con los valores "reales" de los radios censales y un array con los bounding boxes de cada imagen.
-
-    Parameters:
-    -----------
-    ds: xarray.Dataset, dataset con las imágenes de satélite
-    icpag: geopandas.GeoDataFrame, shapefile con los radios censales
-    tiles: int, cantidad de imágenes a generar por lado
-    size: int, tamaño de la imagen a generar, en píxeles
-    resizing_size: int, tamaño al que se redimensiona la imagen
-    bias: int, cantidad de píxeles que se mueve el punto aleatorio de las tiles
-    sample: int, cantidad de imágenes a generar por box (util cuando tiles > 1)
-    to8bit: bool, si es True, convierte la imagen a 8 bits
-
-    Returns:
-    --------
-    images: list, lista con las imágenes generadas
-    points: list, lista con los puntos centrales de cada imagen
-    bounds: list, lista con los bounding boxes de cada imagen
-    """
-    import run_model
-    from shapely.geometry import Polygon
-
-    # FIXME: algunos radios censales no se generan bien. Ejemplo: 065150101. ¿Que pasa ahi?
-    # Inicializo arrays
-    batch_images = np.empty((0, resizing_size, resizing_size, 4))
-    batch_link_names = np.empty((0))
-    batch_predictions = np.empty((0))
-    batch_real_values = np.empty((0))
-    batch_bounds = np.empty((0))
-    all_link_names = np.empty((0))
-    all_predictions = np.empty((0))
-    all_real_values = np.empty((0))
-    all_bounds = np.empty((0))
-
-    tile_size = size // tiles
-    tiles_generated = 0
-
-    # Iterate over the center points of each image:
-    # - Start point is the center of the image (tile_size / 2, start_index)
-    # - End point is the maximum possible center point (link_dataset.y.size)
-    # - Step is the size of each image (tile_size)
-
-    # FIXME: para mejorar la eficiencia, convendría hacer un dissolve de icpag y verificar que
-    # point_geom este en ese polygono y no en todo el df
-    start_index = int(tile_size / 2)
-    for idy in range(start_index, ds.y.size, tile_size):
-        # Iterate over columns
-        for idx in range(start_index, ds.x.size, tile_size):
-            # Get the center point of the image
-            image_point = (float(ds.x[idx]), float(ds.y[idy]))
-            point_geom = sg.Point(image_point)
-
-            # Get data for selected point
-            radio_censal = icpag.loc[icpag.contains(point_geom)]
-            if radio_censal.empty:
-                # El radio censal no existe, es el medio del mar...
-                continue
-
-            real_value = radio_censal["var"].values[0]
-            link_name = radio_censal["link"].values[0]
-
-            # Check if the centroid of the image is within the original polygon:
-            #   - if it is, then generate the n images
-
-            image, point, bound, tbound = utils.random_image_from_census_tract(
-                ds,
-                icpag,
-                link_name,
-                start_point=image_point,
-                tiles=tiles,
-                size=size,
-                bias=bias,
-                to8bit=to8bit,
-            )
-
-            if image is not None:
-                image = utils.process_image(image, resizing_size)
-                geom_bound = Polygon(
-                    bound[0]
-                )  # Create polygon of the shape of the image
-
-                batch_images = np.concatenate([batch_images, np.array([image])], axis=0)
-                batch_link_names = np.concatenate(
-                    [batch_link_names, np.array([link_name])], axis=0
-                )
-                batch_real_values = np.concatenate(
-                    [batch_real_values, np.array([real_value])], axis=0
-                )
-                batch_bounds = np.concatenate(
-                    [batch_bounds, np.array([geom_bound])], axis=0
-                )
-
-                # predict with the model over the batch
-                if batch_images.shape[0] == 128:
-                    # predictions
-                    batch_predictions = run_model.get_batch_predictions(
-                        model, batch_images
-                    )
-
-                    # Store data
-                    all_predictions = np.concatenate(
-                        [all_predictions, batch_predictions], axis=0
-                    )
-                    all_link_names = np.concatenate(
-                        [all_link_names, batch_link_names], axis=0
-                    )
-                    all_real_values = np.concatenate(
-                        [all_real_values, batch_real_values], axis=0
-                    )
-                    all_bounds = np.concatenate([all_bounds, batch_bounds], axis=0)
-
-                    # Restore batches to empty
-                    batch_images = np.empty((0, resizing_size, resizing_size, 4))
-                    batch_predictions = np.empty((0))
-                    batch_link_names = np.empty((0))
-                    batch_predictions = np.empty((0))
-                    batch_real_values = np.empty((0))
-                    batch_bounds = np.empty((0))
-
-    # Creo dataframe para exportar:
-    d = {
-        "link": all_link_names,
-        "predictions": all_predictions,
-        "real_value": all_real_values,
-    }
-
-    df_preds = gpd.GeoDataFrame(d, geometry=all_bounds, crs="epsg:4326")
-
-    return df_preds
-
-
-def get_random_images_for_link(
-    ds, icpag, link, tiles, size, resizing_size, bias, sample, to8bit
-):
-    """
-    Genera n imagenes del poligono del radio censal, tomando imagenes de tamño sizexsize
-    Si dicha imagen se encuentra dentro del polinogo, se genera el composite con dicha imagen mas otras tiles**2 -1 imagenes
-    Devuelve un array con todas las imagenes generadas, un array con los puntos centrales de cada imagen y un array con los bounding boxes de cada imagen.
-
-    Parameters:
-    -----------
-    ds: xarray.Dataset, dataset con las imágenes de satélite
-    icpag: geopandas.GeoDataFrame, shapefile con los radios censales
-    link: str, 9 dígitos que identifican el radio censal
-    tiles: int, cantidad de imágenes a generar por lado
-    size: int, tamaño de la imagen a generar, en píxeles
-    resizing_size: int, tamaño al que se redimensiona la imagen
-    bias: int, cantidad de píxeles que se mueve el punto aleatorio de las tiles
-    sample: int, cantidad de imágenes a generar por box (util cuando tiles > 1)
-    to8bit: bool, si es True, convierte la imagen a 8 bits
-
-    Returns:
-    --------
-    images: list, lista con las imágenes generadas
-    points: list, lista con los puntos centrales de cada imagen
-    bounds: list, lista con los bounding boxes de cada imagen
-    """
-    # FIXME: algunos radios censales no se generan bien. Ejemplo: 065150101. ¿Que pasa ahi?
-    images = []
-    points = []
-    bounds = []
-    tile_size = size // tiles
-    tiles_generated = 0
-
-    link_dataset = crop_dataset_to_link(ds, icpag, link)
-    # FIXME: add margin to the bounding box so left and bottom tiles are not cut. Margin should be the size of the tile - 1
-    link_geometry = icpag.loc[icpag["link"] == link, "geometry"].values[0]
-
-    number_imgs = 0
-    counter = 0  # Limit the times to try to sample the images
-    while (number_imgs < sample) & (counter < sample * 2):
-        # Generate a random point
-        x_point = np.random.uniform(link_dataset.x.min(), link_dataset.x.max())
-        y_point = np.random.uniform(link_dataset.y.min(), link_dataset.y.max())
-
-        # Get the center point of the image
-        image_point = (x_point, y_point)
-        point_geom = sg.Point(image_point)
-
-        # Check if the centroid of the image is within the original polygon:
-        #   - if it is, then generate the n images
-        if link_geometry.contains(point_geom):  # or intersects
-            img, point, bound, tbound = utils.random_image_from_census_tract(
-                ds,
-                icpag,
-                link,
-                start_point=image_point,
-                tiles=tiles,
-                size=size,
-                bias=bias,
-                to8bit=to8bit,
-            )
-
-            counter += 1
-            print(counter)
-
-            if img is not None:
-                # TODO: add a check to see if the image is contained in test bounds
-                img = utils.process_image(img, resizing_size)
-
-                images += [img]
-                points += [point]
-                bounds += [bound]
-                number_imgs += 1
-
-            else:
-                print("Image failed")
-
-    return images, points, bounds
-
-    return images, real_values, links, points, bounds
 
 
 if __name__ == "__main__":
