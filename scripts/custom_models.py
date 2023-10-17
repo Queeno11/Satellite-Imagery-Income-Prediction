@@ -33,7 +33,13 @@ def rebuild_top(model_base, kind="cla") -> Sequential:
 
     # Rebuild top
     model.add(layers.GlobalAveragePooling2D(name="avg_pool"))
+    # FIXME: en el codigo original de keras, esto es un Conv2D-relu-dropout-conv2d-flatten-dense
+    #   based on: https://machinelearningmastery.com/how-to-use-transfer-learning-when-developing-convolutional-neural-network-models/
     model.add(layers.BatchNormalization())
+    model.add(layers.Flatten())
+    model.add(layers.Dropout(0.2))
+    model.add(layers.Dense(1024, name="last_fc", activation="relu"))
+
     if kind == "cla":
         # Add fully conected layers
         # model.add(layers.Dense(2048, name="fc1", activation="relu"))

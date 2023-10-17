@@ -83,7 +83,7 @@ def assign_links_to_datasets(icpag, extents, verbose=True):
     warnings.filterwarnings("ignore")
 
     for name, bbox in extents.items():
-        icpag.loc[icpag.centroid.within(bbox), "dataset"] = name
+        icpag.loc[icpag.within(bbox), "dataset"] = name
 
     nan_links = icpag.dataset.isna().sum()
     icpag = icpag[icpag.dataset.notna()]
@@ -98,7 +98,7 @@ def assign_links_to_datasets(icpag, extents, verbose=True):
     return icpag
 
 
-def split_train_test(metadata):
+def split_train_test(df):
     """Blocks are counted from left to right, one count for test and one for train."""
 
     # Set bounds of test dataset blocks
@@ -108,57 +108,56 @@ def split_train_test(metadata):
     test2_min_x = -58.41
 
     # These blocks are the test dataset.
-    #   All the images have to be inside the test dataset blocks,
-    #   so the filter is based on x_min and x_max of the images.
-    metadata["type"] = np.nan
-    metadata.loc[
-        ((metadata.min_x > test1_min_x) & (metadata.max_x < test1_max_x))
-        | ((metadata.min_x > test2_min_x) & (metadata.max_x < test2_max_x)),
+    #   The hole image have to be inside the train region
+    df["type"] = np.nan
+    df.loc[
+        (
+            (df.min_x > test1_min_x) & (df.max_x < test1_max_x)
+        )  # Entre test1_minx y test1_maxx
+        | (
+            (df.min_x > test2_min_x) & (df.max_x < test2_max_x)
+        ),  # Entre test2_minx y test2_maxx
         "type",
     ] = "test"
 
-    ## Clean overlapping borders
-    # Get bounds of train dataset blocks
-    metadata.loc[metadata.x < test1_min_x, "train_block"] = 1
-    metadata.loc[
-        (metadata.x > test1_max_x) & (metadata.x < test2_min_x), "train_block"
-    ] = 2
-    metadata.loc[metadata.x > test2_max_x, "train_block"] = 3
-    print(metadata.train_block.value_counts())
+    # These blocks are the train dataset.
+    #   The hole image have to be inside the train region
+    df.loc[df.max_x < test1_min_x, "train_block"] = 1  # A la izqauierda de test1
+    df.loc[
+        (df.min_x > test1_max_x) & (df.max_x < test2_min_x), "train_block"
+    ] = 2  # Entre test1 y test2
+    df.loc[df.min_x > test2_max_x, "train_block"] = 3  # A la derecha de test2
+    # print(df.train_block.value_counts())
 
     # Put nans in the overlapping borders
-    metadata.loc[
-        ((metadata.train_block == 1) & (metadata.max_x < test1_min_x))
-        | (
-            (metadata.train_block == 2)
-            & (metadata.min_x > test1_max_x)
-            & (metadata.max_x < test2_min_x)
-        )
-        | ((metadata.train_block == 3) & (metadata.min_x > test2_max_x)),
-        "type",
-    ] = "train"
-    metadata = metadata.drop(columns="train_block")
+    df.loc[df.train_block.isin([1, 2, 3]), "type"] = "train"
+    df = df.drop(columns="train_block")
 
-    test_size = metadata[metadata.type == "test"].shape[0] / metadata.shape[0] * 100
-    train_size = metadata[metadata.type == "train"].shape[0] / metadata.shape[0] * 100
-    invalid_size = metadata[metadata.type.isna()].shape[0] / metadata.shape[0] * 100
+    test_size = df[df["type"] == "test"].shape[0]
+    train_size = df[df["type"] == "train"].shape[0]
+    invalid_size = df[df["type"].isna()].shape[0]
+    total_size = df["type"].shape[0]
+
     print(
-        f"Size of test dataset: {test_size:.2f}%\n",
-        f"Size of train dataset: {train_size:.2f}%\n",
-        f"Deleted images due to train/test overlapping: {invalid_size:.2f}%\n",
+        "",
+        f"Size of test dataset: {test_size/total_size*100:.2f}% ({test_size} census tracts)",
+        f"Size of train dataset: {train_size/total_size*100:.2f}% ({train_size} census tracts)",
+        f"Deleted images due to train/test overlapping: {invalid_size/total_size*100:.2f}% ({invalid_size} census tracts))",
+        sep="\n",
     )
 
-    return metadata
+    return df
 
 
-def assert_train_test_datapoint(point, bounds, wanted_type="train"):
-    """Blocks are counted from left to right, one count for test and one for train."""
+def assert_train_test_datapoint(bounds, wanted_type="train"):
+    """Returns True if the datapoint is of the wanted type (train or test)."""
 
     # Split bounds:
     min_x = bounds[0]
-    max_x = bounds[2]
+    max_x = bounds[1]
 
     # Set bounds of test dataset blocks
+    #    Note: Blocks are counted from left to right, one count for test and one for train.
     test1_max_x = -58.66
     test1_min_x = -58.71
     test2_max_x = -58.36
@@ -173,21 +172,19 @@ def assert_train_test_datapoint(point, bounds, wanted_type="train"):
     ):
         type = "test"
 
-    ## Clean overlapping borders
-    # Get bounds of train dataset blocks
-    if point[0] < test1_min_x:
+    # These blocks are the train dataset.
+    #   The hole image have to be inside the train region
+    if max_x < test1_min_x:
         train_block = 1
-    elif (point[0] > test1_max_x) & (point[0] < test2_min_x):
+    elif (min_x > test1_max_x) & (max_x < test2_min_x):
         train_block = 2
-    elif point[0] > test2_max_x:
+    elif min_x > test2_max_x:
         train_block = 3
+    else:
+        train_block = None
 
     # Put nans in the overlapping borders
-    if (train_block == 1) & (max_x < test1_min_x):
-        type = "train"
-    elif (train_block == 2) & (min_x > test1_max_x) & (max_x < test2_min_x):
-        type = "train"
-    elif (train_block == 3) & (min_x > test2_max_x):
+    if (train_block == 1) | (train_block == 2) | (train_block == 3):
         type = "train"
 
     # Assert type
@@ -195,6 +192,7 @@ def assert_train_test_datapoint(point, bounds, wanted_type="train"):
         istype = True
     else:
         istype = False
+
     return istype
 
 

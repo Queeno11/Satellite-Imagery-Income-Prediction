@@ -134,7 +134,15 @@ def get_image_bounds(image_dataset, boundaries, previous_total_boundaries=None):
 
 
 def random_image_from_census_tract(
-    ds, icpag, link, start_point=None, tiles=1, size=100, bias=4, to8bit=True
+    ds,
+    icpag,
+    link,
+    start_point=None,
+    tiles=1,
+    size=100,
+    bias=4,
+    to8bit=True,
+    image_return_only=False,
 ):
     """Genera una imagen aleatoria de tamaño size centrada en un punto aleatorio del radio censal {link}.
 
@@ -157,7 +165,6 @@ def random_image_from_census_tract(
     point: tuple, coordenadas del punto seleccionado
 
     """
-
     images = []
     boundaries = []
     total_boundaries = None
@@ -168,7 +175,7 @@ def random_image_from_census_tract(
         image = np.zeros((4, 0, 0))
         counter = 0
 
-        while (image.shape != (4, tile_size, tile_size)) & (counter <= 4):
+        while (image.shape != (4, tile_size, tile_size)) & (counter <= 2):
             if tile == 0:
                 max_bias = 0
                 if start_point is None:
@@ -221,11 +228,14 @@ def random_image_from_census_tract(
             composition = np.array(composition >> 6, dtype=np.uint8)
 
     else:
-        print("Some tiles were not found. Image not generated...")
+        # print("Some tiles were not found. Image not generated...")
         composition = None
         point = (None, None)
         boundaries = None
         total_boundaries = (None, None, None, None)
+
+    # if image_return_only:
+    #     return composition
 
     return composition, point, boundaries, total_boundaries
 
@@ -241,7 +251,34 @@ def process_image(img, resizing_size):
         img = cv2.resize(
             img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
         )
-    img = skimage.exposure.equalize_hist(
-        img
-    )  # stretch # FIXME: ¿equalizar imagen por imagen o el tileset entero?
+    img = (
+        skimage.exposure.equalize_hist(img) * 255
+    )  # FIXME: ¿equalizar imagen por imagen o el tileset entero?
+    img = img.astype(np.uint8)
+
+    return img
+
+
+def augment_image(img):
+    rand_2 = np.random.randint(-10, 10) / 100  # Random number between -0.1 and 0.1
+
+    # Random flip
+    if np.random.rand() > 0.5:
+        img = np.fliplr(img)
+    if np.random.rand() > 0.5:
+        img = np.flipud(img)
+
+    # Adjust contrast (power law transformation)
+    #   see: https://web.ece.ucsb.edu/Faculty/Manjunath/courses/ece178W03/EnhancePart1.pdf
+    rand_gamma = (
+        np.random.randint(40, 250) / 100
+    )  # Random number between 0.4 and 2.5 (same level of contrast)
+    img = skimage.exposure.adjust_gamma(img, gamma=rand_gamma)
+
+    # Rescale intensiry
+    rand_min = np.random.randint(0, 5) / 10  # Random number between 0 and 0.5
+    rand_max = np.random.randint(0, 5) / 10  # Random number between 0 and 0.5
+    v_min, v_max = np.percentile(img, (rand_min, 100 - rand_max))
+    img = skimage.exposure.rescale_intensity(img, in_range=(v_min, v_max))
+
     return img
