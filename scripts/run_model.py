@@ -198,7 +198,7 @@ def create_datasets(
     }
 
     ### Generate Datasets
-    datasets = []
+    tf_datasets = []
     for type, params in train_test_dic.items():
         df_subset = params["df"]
         get_data_fn = params["get_data_fn"]
@@ -212,7 +212,7 @@ def create_datasets(
 
         if type == "train":
             dataset = dataset.shuffle(
-                buffer_size=int(df_subset.shape[0]),
+                buffer_size=int(df_subset.shape[0] / 10),
                 seed=825,
                 reshuffle_each_iteration=True,
             )
@@ -224,17 +224,22 @@ def create_datasets(
             num_parallel_calls=tf.data.experimental.AUTOTUNE,
         )
 
-        dataset = dataset.filter(lambda img, value: (value < 0) | (value >= 0)).batch(
-            batch_size_subset
+        dataset = dataset.filter(
+            lambda img, value: (value < 0) | (value >= 0)
         )  # Filter out NaN values
 
         if type == "train":
-            print("repeating and prefetching...")
-            dataset = dataset.repeat(sample).prefetch(tf.data.AUTOTUNE)
+            print(f"repeating ({sample} times) and prefetching...")
+            dataset = (
+                dataset.batch(batch_size_subset).repeat().prefetch(tf.data.AUTOTUNE)
+            )
 
-        datasets += [dataset]
+        elif type == "test":
+            dataset = dataset.batch(batch_size_subset)
 
-    train_dataset, test_dataset = datasets
+        tf_datasets += [dataset]
+
+    train_dataset, test_dataset = tf_datasets
 
     if save_examples == True:
         i = 0
@@ -732,7 +737,7 @@ def get_callbacks(
             )
 
     tensorboard_callback = TensorBoard(
-        log_dir=logdir, histogram_freq=1, profile_batch="100,200"
+        log_dir=logdir, histogram_freq=1  # , profile_batch="100,200"
     )
     # use tensorboard --logdir logs/scalars in your command line to startup tensorboard with the correct logs
 
@@ -775,6 +780,8 @@ def run_model(
     lr: float,
     train_dataset: Iterator,
     test_dataset: Iterator,
+    sample_size: int,
+    batch_size: int,
     loss: str,
     metrics: List[str],
     callbacks: List[Union[TensorBoard, EarlyStopping, ModelCheckpoint]],
@@ -833,6 +840,7 @@ def run_model(
         model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
         initial_epoch = 0
     else:
+        print("Restoring model...")
         # assert os.path.isfolder(
         #     model_path
         # ), "model_path must be a valid path to a model"
@@ -842,6 +850,9 @@ def run_model(
     history = model.fit(
         train_dataset,
         epochs=epochs,
+        steps_per_epoch=int(
+            10000 * sample_size / batch_size
+        ),  # Aprox 8000 radios censales con datos validos
         initial_epoch=initial_epoch,
         validation_data=test_dataset,
         callbacks=callbacks,
@@ -971,6 +982,7 @@ def run(
         If you just want to check if the code is working, set small_sample to True, by default False
     """
     log_dir = f"{path_logs}/{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    batch_size = 64
 
     ### Set Model & loss function
     model, loss, metrics = set_model_and_loss_function(
@@ -997,7 +1009,7 @@ def run(
         resizing_size=resizing_size,
         tiles=tiles,
         sample=sample_size,
-        batch_size=64,
+        batch_size=batch_size,
         save_examples=True,
     )
 
@@ -1023,6 +1035,8 @@ def run(
         lr=0.0001,  # lr=0.00009 para mobnet_v3_20230823-141458
         train_dataset=train_dataset,
         test_dataset=test_dataset,
+        sample_size=sample_size,
+        batch_size=batch_size,
         loss=loss,
         metrics=metrics,
         callbacks=callbacks,

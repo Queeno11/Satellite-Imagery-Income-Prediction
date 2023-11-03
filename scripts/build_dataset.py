@@ -40,13 +40,17 @@ import utils
 def load_satellite_datasets():
     """Load satellite datasets and get their extents"""
 
-    files = os.listdir(rf"{path_datain}/Pansharpened/2013")
-    assert os.path.isdir(rf"{path_datain}/Pansharpened/2013")
+    files = os.listdir(rf"{path_satelites}/Pansharpened/2013")
+    assert os.path.isdir(rf"{path_satelites}/Pansharpened/2013")
     files = [f for f in files if f.endswith(".tif")]
-    assert all([os.path.isfile(rf"{path_datain}/Pansharpened/2013/{f}") for f in files])
+    assert all(
+        [os.path.isfile(rf"{path_satelites}/Pansharpened/2013/{f}") for f in files]
+    )
 
     datasets = {
-        f.replace(".tif", ""): xr.open_dataset(rf"{path_datain}/Pansharpened/2013/{f}")
+        f.replace(".tif", ""): xr.open_dataset(
+            rf"{path_satelites}/Pansharpened/2013/{f}"
+        )
         for f in files
     }
     extents = {name: utils.get_dataset_extent(ds) for name, ds in datasets.items()}
