@@ -122,7 +122,7 @@ def create_datasets(
     save_examples=True,
 ):
     # Based on: https://medium.com/@acordier/tf-data-dataset-generators-with-parallelization-the-easy-way-b5c5f7d2a18
-
+    @tf.function
     def get_data(i, df_subset, type="train"):
         # Decoding from the EagerTensor object. Extracts the number/value from the tensor
         #   example: <tf.Tensor: shape=(), dtype=uint8, numpy=20> -> 20
