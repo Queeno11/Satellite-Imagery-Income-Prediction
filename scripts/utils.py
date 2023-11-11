@@ -132,8 +132,110 @@ def get_image_bounds(image_dataset, boundaries, previous_total_boundaries=None):
 
     return boundaries, total_boundaries
 
+def assert_image_is_valid(image, n_bands, size):
+    ''' Check whether image is valid. For using after image_from_point.
+        If the image is valid, returns the image in numpy format. 
+    '''
+    try:
+        image = image_dataset.band_data
+        is_valid = True
+    except:
+        is_valid = False
+
+    return image, is_valid
 
 def random_image_from_census_tract(
+    ds,
+    icpag,
+    link,
+    start_point=None,
+    size=100,
+    n_bands=4,
+    n_stacked_images=1,
+    to8bit=True,
+    image_return_only=False,
+):
+    """Genera una imagen aleatoria de tamaño size centrada en un punto aleatorio del radio censal {link}.
+
+    Parameters:
+    -----------
+    ds: xarray.Dataset, dataset con las imágenes de satélite
+    icpag: geopandas.GeoDataFrame, shapefile con los radios censales
+    link: str, 9 dígitos que identifican el radio censal
+    start_point: tuple, coordenadas del punto inicial, en formato (x, y). Si se establece,
+        la imagen de la tile 0 se genera con este punto como centro. Si no,
+        se genera un punto aleatorio.
+    tiles: int, cantidad de imágenes a generar por lado
+    size: int, tamaño de la imagen a generar, en píxeles
+    bias: int, cantidad de píxeles que se mueve el punto aleatorio de las tiles
+    to8bit: bool, si es True, convierte la imagen a 8 bits
+
+    Returns:
+    --------
+    image: numpy.ndarray or None. numpy.ndarray, imagen de tamaño size x size. Si no se encuentra la imagen, devuelve None.
+    point: tuple, coordenadas del punto seleccionado
+
+    """
+    total_bands = n_bands * n_stacked_images
+    is_valid = False
+    counter = 0
+
+    while (is_valid==False) & (counter <= 2):
+        # Get start point
+        if start_point is None:
+            x, y = random_point_from_geometry(
+                icpag.loc[icpag["link"] == link], size
+            )
+            point = (x[0], y[0])
+        else:
+            point = start_point
+
+        ## Generate images
+        # big
+        big_image_dataset = image_from_point(
+            ds, point, tile_size=size*4
+        )
+        big_image, big_is_valid = assert_image_is_valid(big_image_dataset, n_bands, size)
+
+        if big_is_valid is False:
+            counter += 1
+            continue
+
+        # small
+        small_image_dataset = image_from_point(
+            ds, point, tile_size=size
+        )
+        small_image, small_is_valid = assert_image_is_valid(small_image_dataset, n_bands, size)
+        if small_is_valid is False:
+            counter += 1
+            continue        
+
+    if small_is_valid & big_is_valid:
+        image = np.concatenate([small_image, big_image], axis=0) # Concat over bands
+        assert image.shape == (bands, size, size)
+        
+        # Si la imagen tiene el tamaño correcto, la guardo
+        image = image.to_numpy().astype(np.uint16)
+
+        # Get image bounds and update total boundaries
+        boundaries, total_boundaries = get_image_bounds(
+            big_image_dataset, boundaries, total_boundaries
+        )
+
+        if to8bit:
+            image = np.array(image >> 6, dtype=np.uint8)
+
+    else:
+        # print("Some tiles were not found. Image not generated...")
+        image = None
+        point = (None, None)
+        boundaries = None
+        total_boundaries = (None, None, None, None)
+
+    return image, point, boundaries, total_boundaries
+
+
+def random_tiled_image_from_census_tract(
     ds,
     icpag,
     link,
@@ -196,6 +298,7 @@ def random_image_from_census_tract(
             image_dataset = image_from_point(
                 ds, point, max_bias=max_bias, tile_size=tile_size
             )
+            
             try:
                 image = image_dataset.band_data
             except:
@@ -238,6 +341,7 @@ def random_image_from_census_tract(
     #     return composition
 
     return composition, point, boundaries, total_boundaries
+
 
 
 def process_image(img, resizing_size):

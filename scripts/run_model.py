@@ -135,8 +135,9 @@ def create_datasets(
 
         # Generate the image
         image, point, bounds, total_bounds = utils.random_image_from_census_tract(
-            link_dataset, df_subset, link, tiles=tiles, size=image_size, bias=2
+            link_dataset, df_subset, link, n_stacked_images=2, size=image_size
         )
+
 
         if image is not None:
             image = utils.process_image(image, resizing_size)
