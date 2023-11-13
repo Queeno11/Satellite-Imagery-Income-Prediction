@@ -106,7 +106,7 @@ def image_from_point(ds, point, max_bias=0, tile_size=100):
     return image_dataset
 
 
-def get_image_bounds(image_dataset, boundaries, previous_total_boundaries=None):
+def get_image_bounds(image_dataset, boundaries=[], previous_total_boundaries=None):
     if previous_total_boundaries is None:
         min_x_min, max_x_max, min_y_min, max_y_max = +999, -999, +999, -999
     else:
@@ -132,7 +132,7 @@ def get_image_bounds(image_dataset, boundaries, previous_total_boundaries=None):
 
     return boundaries, total_boundaries
 
-def assert_image_is_valid(image, n_bands, size):
+def assert_image_is_valid(image_dataset, n_bands, size):
     ''' Check whether image is valid. For using after image_from_point.
         If the image is valid, returns the image in numpy format. 
     '''
@@ -140,18 +140,60 @@ def assert_image_is_valid(image, n_bands, size):
         image = image_dataset.band_data
         is_valid = True
     except:
+        image = np.zeros(shape=[1,100,100])
         is_valid = False
 
     return image, is_valid
+
+def stacked_images_from_point(ds, point, size_small=100, n_bands=4, stacked_images=[1,2]):
+    ''' Generate image composition of many stacked images along the band axis (first axis). 
+        The resulting image is, for example, an array of size (8, 128, 128), where the first 4
+        bands represent the first image.       
+    '''
+    images_to_stack = []
+    boundaries = []
+    total_bands = n_bands*len(stacked_images)
+
+    for size_multiplier in stacked_images:
+
+        image_size = size_small*size_multiplier
+        image_dataset = image_from_point(
+            ds, point, tile_size=image_size
+        )
+        image, image_is_valid = assert_image_is_valid(image_dataset, n_bands, image_size)
+
+        if image_is_valid is False:
+            image = None
+            is_valid = False
+            boundaries = None
+            total_boundaries = None
+            return image, is_valid, boundaries, total_boundaries # Return as soon as some error apears to save time
+
+        else:
+            is_valid = True
+            boundaries, total_boundaries = get_image_bounds(
+                image_dataset, boundaries
+            )
+            # Resize image to match size_small
+            image = image.to_numpy().astype(np.uint16)[:,::size_multiplier,::size_multiplier]
+            images_to_stack += [image]
+            
+    # return images_to_stack, True
+    image = np.concatenate(images_to_stack, axis=0) # Concat over bands
+    assert image.shape == (total_bands, size_small, size_small)
+    is_valid = True
+    
+    return image, is_valid, boundaries, total_boundaries
+        
 
 def random_image_from_census_tract(
     ds,
     icpag,
     link,
     start_point=None,
-    size=100,
+    size_small=100,
     n_bands=4,
-    n_stacked_images=1,
+    stacked_images=[1,2],
     to8bit=True,
     image_return_only=False,
 ):
@@ -176,57 +218,29 @@ def random_image_from_census_tract(
     point: tuple, coordenadas del punto seleccionado
 
     """
-    total_bands = n_bands * n_stacked_images
+    total_bands = n_bands * len(stacked_images)
     is_valid = False
     counter = 0
 
-    while (is_valid==False) & (counter <= 2):
+    while (is_valid==False) | (counter <= 2):
         # Get start point
         if start_point is None:
             x, y = random_point_from_geometry(
-                icpag.loc[icpag["link"] == link], size
+                icpag.loc[icpag["link"] == link]
             )
             point = (x[0], y[0])
         else:
             point = start_point
 
         ## Generate images
-        # big
-        big_image_dataset = image_from_point(
-            ds, point, tile_size=size*4
-        )
-        big_image, big_is_valid = assert_image_is_valid(big_image_dataset, n_bands, size)
-
-        if big_is_valid is False:
-            counter += 1
-            continue
-
-        # small
-        small_image_dataset = image_from_point(
-            ds, point, tile_size=size
-        )
-        small_image, small_is_valid = assert_image_is_valid(small_image_dataset, n_bands, size)
-        if small_is_valid is False:
-            counter += 1
-            continue        
-
-    if small_is_valid & big_is_valid:
-        image = np.concatenate([small_image, big_image], axis=0) # Concat over bands
-        assert image.shape == (bands, size, size)
-        
-        # Si la imagen tiene el tamaño correcto, la guardo
-        image = image.to_numpy().astype(np.uint16)
-
-        # Get image bounds and update total boundaries
-        boundaries, total_boundaries = get_image_bounds(
-            big_image_dataset, boundaries, total_boundaries
-        )
+        image, is_valid, boundaries, total_boundaries = stacked_images_from_point(ds=ds, point=point, size_small=size_small, n_bands=n_bands, stacked_images=stacked_images)
+        counter += 1
 
         if to8bit:
             image = np.array(image >> 6, dtype=np.uint8)
 
-    else:
-        # print("Some tiles were not found. Image not generated...")
+    if image.shape != (total_bands, size_small, size_small):
+        print("Some tiles were not found. Image not generated...")
         image = None
         point = (None, None)
         boundaries = None
@@ -364,8 +378,6 @@ def process_image(img, resizing_size):
 
 
 def augment_image(img):
-    rand_2 = np.random.randint(-10, 10) / 100  # Random number between -0.1 and 0.1
-
     # Random flip
     if np.random.rand() > 0.5:
         img = np.fliplr(img)
