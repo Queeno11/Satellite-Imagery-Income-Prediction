@@ -25,7 +25,7 @@ path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
 # )
 
 # Step 3: Train the Model
-initial_epoch = 199
+initial_epoch = 0
 run(
     model_name=model,
     pred_variable=variable,
@@ -37,8 +37,8 @@ run(
     resizing_size=resizing_size,
     tiles=tiles,
     n_epochs=250,
-    initial_epoch=initial_epoch,
-    model_path=f"{path_repo}/data/data_out/models_by_epoch/{model}_size{image_size}_tiles{tiles}_sample5/{model}_size{image_size}_tiles{tiles}_sample5_{initial_epoch}",
+    # initial_epoch=initial_epoch,
+    # model_path=f"{path_repo}/data/data_out/models_by_epoch/{model}_size{image_size}_tiles{tiles}_sample5/{model}_size{image_size}_tiles{tiles}_sample5_{initial_epoch}",
 )
 
 # if __name__ == "__main__":

@@ -37,7 +37,7 @@ from tqdm import tqdm
 import utils
 
 
-def load_satellite_datasets():
+def load_satellite_datasets(stretch=False):
     """Load satellite datasets and get their extents"""
 
     files = os.listdir(rf"{path_satelites}/Pansharpened/2013")
@@ -48,11 +48,14 @@ def load_satellite_datasets():
     )
 
     datasets = {
-        f.replace(".tif", ""): xr.open_dataset(
-            rf"{path_satelites}/Pansharpened/2013/{f}"
+        f.replace(".tif", ""): (
+            xr.open_dataset(rf"{path_satelites}/Pansharpened/2013/{f}")
         )
         for f in files
     }
+    if stretch:
+        datasets = {name:stretch_dataset(ds) for name, ds in datasets.items()}
+        
     extents = {name: utils.get_dataset_extent(ds) for name, ds in datasets.items()}
 
     return datasets, extents
@@ -152,13 +155,32 @@ def split_train_test(df):
 
     return df
 
+def assert_train_test_datapoint(bounds, wanted_type="train"):
+    min_x, _, max_x, _ = bounds  # Ignore min_y and max_y
+
+    test_blocks = [(-58.71, -58.66), (-58.41, -58.36)]
+
+    for (test_min_x, test_max_x) in test_blocks:
+        if test_min_x < min_x < max_x < test_max_x:
+            # Inside test bloc
+            return wanted_type == "test"
+        elif max_x < test_min_x:
+            return wanted_type == "train"
+        elif test_max_x < min_x < max_x:
+            return wanted_type == "train"
+        elif max_x < test_max_x:
+            return wanted_type == "train"
+
+    return False
+
 
 def assert_train_test_datapoint(bounds, wanted_type="train"):
     """Returns True if the datapoint is of the wanted type (train or test)."""
 
     # Split bounds:
-    min_x = bounds[0]
-    max_x = bounds[1]
+    min_x, _, max_x, _ = bounds
+    # min_x = bounds[0]
+    # max_x = bounds[1]
 
     # Set bounds of test dataset blocks
     #    Note: Blocks are counted from left to right, one count for test and one for train.
@@ -750,6 +772,15 @@ def get_random_images_for_link(
     return images, points, bounds
 
     return images, real_values, links, points, bounds
+
+def stretch_dataset(ds, pixel_depth=32_767):
+    ''' Stretch band data from satellite images. '''
+    minimum = ds.band_data.quantile(.01).values
+    maximum = ds.band_data.quantile(.99).values
+    ds = (ds - minimum) / (maximum - minimum) * pixel_depth
+    ds = ds.where(ds.band_data > 0, 0)
+    ds = ds.where(ds.band_data < pixel_depth, pixel_depth)
+    return ds
 
 
 if __name__ == "__main__":

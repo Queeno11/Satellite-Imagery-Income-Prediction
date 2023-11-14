@@ -56,7 +56,7 @@ def mobnet_v3(resizing_size, kind="reg", weights=None) -> Sequential:
 
     model_base = MobileNetV3Large(
         include_top=False,
-        input_shape=(resizing_size, resizing_size, 4),
+        input_shape=(resizing_size, resizing_size, 8),
         weights=None,
         include_preprocessing=False,
     )

@@ -65,8 +65,8 @@ def find_nearest_raster(x_array, y_array, x_value, y_value, max_bias=0):
     y_bias = round(np.sin(angle_bias) * actual_bias)
 
     # Get the nearest index for each axis and add the bias
-    x_idx = find_nearest_idx(x_array, x_value) + x_bias
-    y_idx = find_nearest_idx(y_array, y_value) + y_bias
+    x_idx = np.searchsorted(x_array, x_value, side='left', sorter=None) + x_bias
+    y_idx = np.searchsorted(y_array, y_value, side='left', sorter=None) + y_bias
     return x_idx, y_idx
 
 
@@ -236,7 +236,7 @@ def random_image_from_census_tract(
         image, is_valid, boundaries, total_boundaries = stacked_images_from_point(ds=ds, point=point, size_small=size_small, n_bands=n_bands, stacked_images=stacked_images)
         counter += 1
 
-        if to8bit:
+        if to8bit & is_valid:
             image = np.array(image >> 6, dtype=np.uint8)
 
     if image.shape != (total_bands, size_small, size_small):
@@ -362,17 +362,15 @@ def process_image(img, resizing_size):
     img = np.moveaxis(
         img, 0, 2
     )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
-    # img = img[:, :, :3]  # FIXME: remove this line when using 4 channels
+    
     image_size = img.shape[0]
-
     if image_size != resizing_size:
         img = cv2.resize(
             img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
         )
     img = (
-        skimage.exposure.equalize_hist(img) * 255
+        skimage.exposure.equalize_hist(img)
     )  # FIXME: ¿equalizar imagen por imagen o el tileset entero?
-    img = img.astype(np.uint8)
 
     return img
 
@@ -391,10 +389,10 @@ def augment_image(img):
     )  # Random number between 0.4 and 2.5 (same level of contrast)
     img = skimage.exposure.adjust_gamma(img, gamma=rand_gamma)
 
-    # Rescale intensiry
+    # Rescale intensity
     rand_min = np.random.randint(0, 5) / 10  # Random number between 0 and 0.5
     rand_max = np.random.randint(0, 5) / 10  # Random number between 0 and 0.5
     v_min, v_max = np.percentile(img, (rand_min, 100 - rand_max))
     img = skimage.exposure.rescale_intensity(img, in_range=(v_min, v_max))
-
+    
     return img

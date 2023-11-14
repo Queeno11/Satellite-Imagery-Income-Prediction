@@ -122,7 +122,6 @@ def create_datasets(
     save_examples=True,
 ):
     # Based on: https://medium.com/@acordier/tf-data-dataset-generators-with-parallelization-the-easy-way-b5c5f7d2a18
-    @tf.function
     def get_data(i, df_subset, type="train"):
         # Decoding from the EagerTensor object. Extracts the number/value from the tensor
         #   example: <tf.Tensor: shape=(), dtype=uint8, numpy=20> -> 20
@@ -135,7 +134,7 @@ def create_datasets(
 
         # Generate the image
         image, point, bounds, total_bounds = utils.random_image_from_census_tract(
-            link_dataset, df_subset, link, n_stacked_images=2, size=image_size
+            link_dataset, df_subset, link, stacked_images=[1,3], size_small=image_size
         )
 
 
@@ -164,7 +163,7 @@ def create_datasets(
     def get_train_data(i):
         image, value = get_data(i, df_train, type="train")
         return image, value
-
+    
     def get_test_data(i):
         image, value = get_data(i, df_test, type="test")
         return image, value
