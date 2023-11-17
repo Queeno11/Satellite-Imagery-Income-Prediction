@@ -212,15 +212,18 @@ def get_data(i):
 
 if __name__ == "__main__":
 
-    from tqdm import tqdm
-    andan = 0
-    no_andan = 0
-    for i in tqdm(range(0, 3000)):
-        image, val = get_data(i)
-        if image.shape == (img_size, img_size, 8):
-            andan += 1
-        else:
-            no_andan += 1
+    import run_model
+    import tensorflow as tf
+    tast = run_model.get_data(tf.constant(1500), 1, "train", load=True)
+    # from tqdm import tqdm
+    # andan = 0
+    # no_andan = 0
+    # for i in tqdm(range(0, 3000)):
+    #     image, val = get_data(i)
+    #     if image.shape == (img_size, img_size, 8):
+    #         andan += 1
+    #     else:
+    #         no_andan += 1
 
-    print(f"Train: {andan}\n No andan: {no_andan}")
+    # print(f"Train: {andan}\n No andan: {no_andan}")
 

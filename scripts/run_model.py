@@ -122,44 +122,47 @@ def create_datasets(
     save_examples=True,
 ):
     # Based on: https://medium.com/@acordier/tf-data-dataset-generators-with-parallelization-the-easy-way-b5c5f7d2a18
-    def get_data(i, df_subset, type="train"):
+    def get_data(i, df_subset, type="train", load=False):
         # Decoding from the EagerTensor object. Extracts the number/value from the tensor
         #   example: <tf.Tensor: shape=(), dtype=uint8, numpy=20> -> 20
         i = i.numpy()
 
+        if load:
+            df_train, df_test, sat_imgs_datasets = create_train_test_dataframes(small_sample=False)
+
         # Get link, dataset and indicator value of the corresponding index
-        link = df_subset.iloc[i]["link"]
+        polygon = df_subset.iloc[i]["geometry"]
         value = df_subset.iloc[i]["var"]
         link_dataset = sat_img_dataset[df_subset.iloc[i]["dataset"]]
 
         # Generate the image
-        image, point, bounds, total_bounds = utils.random_image_from_census_tract(
-            link_dataset, df_subset, link, stacked_images=[1,3], size_small=image_size
-        )
+        image, boundaries = utils.stacked_image_from_census_tract(link_dataset, polygon, image_size)
 
-
-        if image is not None:
-            image = utils.process_image(image, resizing_size)
-
-            # Augment dataset
-            # if type == "train":
-            #     image = utils.augment_image(image)
+        if image.shape == (8, image_size, image_size):
 
             # Assert that data corresponds to train or test
             is_correct_type = build_dataset.assert_train_test_datapoint(
-                total_bounds, wanted_type=type
+                boundaries, wanted_type=type
             )
+
             if is_correct_type == False:  # If the point is not train/test, discard it
-                image = 0
+                image = np.zeros(shape=(4,0,0))
                 value = np.nan
+                return image, value
+        
+            # Reduce quality and process image 
+            image = utils.process_image(image, resizing_size=resizing_size)
+
+            # Augment dataset
+            if type == "train":
+                image = utils.augment_image(image)
 
         else:
-            # Value nan gets filtered later!
-            image = 0
+            image = np.zeros(shape=(1,1,1))
             value = np.nan
-
+    
         return image, value
-
+    
     def get_train_data(i):
         image, value = get_data(i, df_train, type="train")
         return image, value
@@ -704,26 +707,26 @@ def get_callbacks(
             self.log_dir = log_dir
 
         def on_epoch_end(self, epoch, logs=None):
-            print("Calculando el verdadero ECM. Esto puede tardar un rato...")
-            # Calculate your custom loss here (replace this with your actual custom loss calculation)
-            df_prediciones, mse = compute_custom_loss(
-                self.model,
-                df_test,
-                sat_img_datasets,
-                tiles,
-                size,
-                resizing_size,
-                bias,
-                test_sample,
-                to8bit,
-                verbose=False,
-            )
-            print(f"True Mean Squared Error: {mse}")
-            print(f"True R squared: {1-mse/df_test['var'].var()}")
+            # print("Calculando el verdadero ECM. Esto puede tardar un rato...")
+            # # Calculate your custom loss here (replace this with your actual custom loss calculation)
+            # df_prediciones, mse = compute_custom_loss(
+            #     self.model,
+            #     df_test,
+            #     sat_img_datasets,
+            #     tiles,
+            #     size,
+            #     resizing_size,
+            #     bias,
+            #     test_sample,
+            #     to8bit,
+            #     verbose=False,
+            # )
+            # print(f"True Mean Squared Error: {mse}")
+            # print(f"True R squared: {1-mse/df_test['var'].var()}")
 
-            # Log the custom loss to TensorBoard
-            with tf.summary.create_file_writer(self.log_dir).as_default():
-                tf.summary.scalar("true_mean_squared_error", mse, step=epoch)
+            # # Log the custom loss to TensorBoard
+            # with tf.summary.create_file_writer(self.log_dir).as_default():
+            #     tf.summary.scalar("true_mean_squared_error", mse, step=epoch)
 
             # Save model
             os.makedirs(f"{path_dataout}/models_by_epoch/{savename}", exist_ok=True)
@@ -731,10 +734,10 @@ def get_callbacks(
                 f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}",
                 include_optimizer=True,
             )
-            # Save predictions
-            df_prediciones.to_csv(
-                f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}.csv"
-            )
+            # # Save predictions
+            # df_prediciones.to_csv(
+            #     f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}.csv"
+            # )
 
     tensorboard_callback = TensorBoard(
         log_dir=logdir, histogram_freq=1  # , profile_batch="100,200"
@@ -828,8 +831,9 @@ def run_model(
         model = model_function
         model.summary()
         # keras.utils.plot_model(model, to_file=model_name + ".png", show_shapes=True)
+        optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
 
-        optimizer = tf.keras.optimizers.Adam()
+        # optimizer = tf.keras.optimizers.Adam()
         # opt = tfa.optimizers.RectifiedAdam(learning_rate=lr)
         # # Nesterov Accelerated Gradient (NAG)
         # #   https://kyle-r-kieser.medium.com/tuning-your-keras-sgd-neural-network-optimizer-768536c7ef0

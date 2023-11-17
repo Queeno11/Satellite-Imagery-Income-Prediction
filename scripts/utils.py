@@ -3,7 +3,7 @@ import numpy as np
 import geopandas as gpd
 import cv2
 import skimage
-
+from shapely import Point
 
 def get_dataset_extent(ds):
     """Return a polygon with the extent of the dataset
@@ -28,25 +28,20 @@ def get_dataset_extent(ds):
     return polygon
 
 
-def random_point_from_geometry(gdf_slice, size=100):
-    """Generates a random point within the bounds of a GeoDataFrame."""
+def random_point_from_geometry(polygon, size=100):
+    '''Generates a random point within the bounds of a Polygon.'''
 
     # Get bounds of the shapefile's polygon
-    bbox = gdf_slice.bounds
+    (minx, miny, maxx, maxy) = polygon.bounds
 
+    # Loop until finding a random point inside the polygon
     while 0 == 0:
         # generate random data within the bounds
-        x = np.random.uniform(bbox["minx"], bbox["maxx"], 1)
-        y = np.random.uniform(bbox["miny"], bbox["maxy"], 1)
-
-        # convert them to a points GeoSeries
-        gdf_points = gpd.GeoSeries(gpd.points_from_xy(x, y), crs=3857)
-        # only keep those points within polygons
-        gdf_points = gdf_points[gdf_points.within(gdf_slice.unary_union)]
-        if len(gdf_points) > 0:
-            # If one point is found, stop the loop
-            return (x, y)
-
+        x = np.random.uniform(minx, maxx, 1)
+        y = np.random.uniform(miny, maxy, 1)
+        point = Point(x, y)
+        if polygon.contains(point):
+            return x[0], y[0]
 
 def find_nearest_idx(array, value):
     array = np.asarray(array)
@@ -77,60 +72,46 @@ def point_column_to_x_y(df):
     return df[["x", "y"]]
 
 
-def image_from_point(ds, point, max_bias=0, tile_size=100):
+def image_from_point(dataset, point, img_size=128):
+    
+    # Find the rearest raster of this random point
     x, y = point
-    # Identifico el raster más cercano a este punto -- va a ser el centro de la imagen
-    idx_x, idx_y = find_nearest_raster(ds.x, ds.y, x, y, max_bias=max_bias)
-
-    # # Genero el cuadrado que quiero capturar en la imagen
-    idx_x_min = round(idx_x - tile_size / 2)
-    idx_x_max = round(idx_x + tile_size / 2)
-    idx_y_min = round(idx_y - tile_size / 2)
-    idx_y_max = round(idx_y + tile_size / 2)
+    idx_x = np.searchsorted(dataset.x, x, side='left', sorter=None)
+    idx_y = np.searchsorted(-dataset.y, -y, side='left', sorter=None) # The y array is inverted! https://stackoverflow.com/questions/43095739/numpy-searchsorted-descending-order
+    
+    # Create the indexes of the box of the image
+    idx_x_min = round(idx_x - img_size / 2)
+    idx_x_max = round(idx_x + img_size / 2)
+    idx_y_min = round(idx_y - img_size / 2)
+    idx_y_max = round(idx_y + img_size / 2)
 
     # If any of the indexes are negative, move to the next iteration
     if (
         (idx_x_min < 0)
-        | (idx_x_max > ds.x.size)
+        | (idx_x_max > dataset.x.size)
         | (idx_y_min < 0)
-        | (idx_y_max > ds.y.size)
+        | (idx_y_max > dataset.y.size)
     ):
-        image = np.zeros((4, 0, 0))
+        image = np.zeros(shape=(1,1,1))
         return image
 
-    # Filtro el dataset para quedarme con esWa imagen
-    image_dataset = ds.isel(
-        x=slice(idx_x_min, idx_x_max), y=slice(idx_y_min, idx_y_max)
+    
+    image = dataset.isel(
+        x=slice(idx_x_min, idx_x_max),
+        y=slice(idx_y_min, idx_y_max)
     )
+    
+    image = image.band_data
+    return image
 
-    return image_dataset
-
-
-def get_image_bounds(image_dataset, boundaries=[], previous_total_boundaries=None):
-    if previous_total_boundaries is None:
-        min_x_min, max_x_max, min_y_min, max_y_max = +999, -999, +999, -999
-    else:
-        min_x_min, max_x_max, min_y_min, max_y_max = previous_total_boundaries
-
-    # Get boundaries of the image
-    x_min = image_dataset.x.values.min()
-    x_max = image_dataset.x.values.max()
-    y_min = image_dataset.y.values.min()
-    y_max = image_dataset.y.values.max()
-    boundaries += [((x_min, y_min), (x_min, y_max), (x_max, y_max), (x_max, y_min))]
-
-    # Get minumum and maximum values for each axis of all the images
-    if x_min < min_x_min:
-        min_x_min = x_min
-    if x_max > max_x_max:
-        max_x_max = x_max
-    if y_min < min_y_min:
-        min_y_min = y_min
-    if y_max > max_y_max:
-        max_y_max = y_max
-    total_boundaries = (min_x_min, max_x_max, min_y_min, max_y_max)
-
-    return boundaries, total_boundaries
+def get_image_bounds(image_ds):
+    # The array y is inverted!
+    min_x = image_ds.x[0].item()
+    min_y = image_ds.y[-1].item()
+    max_x = image_ds.x[-1].item()
+    max_y = image_ds.y[0].item()
+    
+    return min_x, min_y, max_x, max_y
 
 def assert_image_is_valid(image_dataset, n_bands, size):
     ''' Check whether image is valid. For using after image_from_point.
@@ -145,109 +126,54 @@ def assert_image_is_valid(image_dataset, n_bands, size):
 
     return image, is_valid
 
-def stacked_images_from_point(ds, point, size_small=100, n_bands=4, stacked_images=[1,2]):
-    ''' Generate image composition of many stacked images along the band axis (first axis). 
-        The resulting image is, for example, an array of size (8, 128, 128), where the first 4
-        bands represent the first image.       
-    '''
+def stacked_image_from_census_tract(dataset, polygon, img_size=100, n_bands=4, stacked_images=[1,3]):
+    
     images_to_stack = []
-    boundaries = []
     total_bands = n_bands*len(stacked_images)
 
-    for size_multiplier in stacked_images:
-
-        image_size = size_small*size_multiplier
-        image_dataset = image_from_point(
-            ds, point, tile_size=image_size
-        )
-        image, image_is_valid = assert_image_is_valid(image_dataset, n_bands, image_size)
-
-        if image_is_valid is False:
-            image = None
-            is_valid = False
-            boundaries = None
-            total_boundaries = None
-            return image, is_valid, boundaries, total_boundaries # Return as soon as some error apears to save time
-
-        else:
-            is_valid = True
-            boundaries, total_boundaries = get_image_bounds(
-                image_dataset, boundaries
-            )
-            # Resize image to match size_small
-            image = image.to_numpy().astype(np.uint16)[:,::size_multiplier,::size_multiplier]
-            images_to_stack += [image]
-            
-    # return images_to_stack, True
-    image = np.concatenate(images_to_stack, axis=0) # Concat over bands
-    assert image.shape == (total_bands, size_small, size_small)
-    is_valid = True
+    # Sample point from the polygon's box
+    point = random_point_from_geometry(polygon)
     
-    return image, is_valid, boundaries, total_boundaries
-        
+    for size_multiplier in stacked_images:
+        image_size = img_size*size_multiplier
+        image_da = image_from_point(dataset, point, image_size)
 
-def random_image_from_census_tract(
-    ds,
-    icpag,
-    link,
-    start_point=None,
-    size_small=100,
-    n_bands=4,
-    stacked_images=[1,2],
-    to8bit=True,
-    image_return_only=False,
-):
+        try:   
+            image = image_da.to_numpy()[:,::size_multiplier,::size_multiplier]
+            image = image.astype(np.uint8)
+            images_to_stack += [image]
+        except:
+            image = np.zeros(shape=(1,1,1))
+            bounds = None
+            return image, bounds
+
+    # Get total bounds
+    bounds = get_image_bounds(image_da) # The last image has to be the bigger
+    image = np.concatenate(images_to_stack, axis=0) # Concat over bands
+    assert image.shape == (total_bands, img_size, img_size)
+    
+    return image, bounds
+
+def random_image_from_census_tract(dataset, polygon, image_size):
     """Genera una imagen aleatoria de tamaño size centrada en un punto aleatorio del radio censal {link}.
 
     Parameters:
     -----------
-    ds: xarray.Dataset, dataset con las imágenes de satélite
-    icpag: geopandas.GeoDataFrame, shapefile con los radios censales
-    link: str, 9 dígitos que identifican el radio censal
-    start_point: tuple, coordenadas del punto inicial, en formato (x, y). Si se establece,
-        la imagen de la tile 0 se genera con este punto como centro. Si no,
-        se genera un punto aleatorio.
-    tiles: int, cantidad de imágenes a generar por lado
-    size: int, tamaño de la imagen a generar, en píxeles
-    bias: int, cantidad de píxeles que se mueve el punto aleatorio de las tiles
-    to8bit: bool, si es True, convierte la imagen a 8 bits
+    dataset: xarray.Dataset, dataset con las imágenes de satélite del link correspondiente
+    polygon: shapely.Polygon, shape del radio censal
+    image_size: int, tamaño del lado de la imagen
 
     Returns:
     --------
-    image: numpy.ndarray or None. numpy.ndarray, imagen de tamaño size x size. Si no se encuentra la imagen, devuelve None.
+    image_da: xarray.DataArray, imagen de tamaño size x size. Si no se encuentra la imagen, devuelve una con size (8, size, size).
     point: tuple, coordenadas del punto seleccionado
 
     """
-    total_bands = n_bands * len(stacked_images)
-    is_valid = False
-    counter = 0
 
-    while (is_valid==False) | (counter <= 2):
-        # Get start point
-        if start_point is None:
-            x, y = random_point_from_geometry(
-                icpag.loc[icpag["link"] == link]
-            )
-            point = (x[0], y[0])
-        else:
-            point = start_point
-
-        ## Generate images
-        image, is_valid, boundaries, total_boundaries = stacked_images_from_point(ds=ds, point=point, size_small=size_small, n_bands=n_bands, stacked_images=stacked_images)
-        counter += 1
-
-        if to8bit & is_valid:
-            image = np.array(image >> 6, dtype=np.uint8)
-
-    if image.shape != (total_bands, size_small, size_small):
-        print("Some tiles were not found. Image not generated...")
-        image = None
-        point = (None, None)
-        boundaries = None
-        total_boundaries = (None, None, None, None)
-
-    return image, point, boundaries, total_boundaries
-
+    # Sample point from the polygon's box
+    point = random_point_from_geometry(polygon)
+    image_da = image_from_point(dataset, point, img_size=image_size)    
+    return image_da
 
 def random_tiled_image_from_census_tract(
     ds,
@@ -321,7 +247,7 @@ def random_tiled_image_from_census_tract(
 
             if image.shape == (4, tile_size, tile_size):
                 # Si la imagen tiene el tamaño correcto, la guardo y salgo del loop
-                images += [image.to_numpy().astype(np.uint16)]
+                images += [image.to_numpy().astype(np.uint8)]
 
                 # Get image bounds and update total boundaries
                 boundaries, total_boundaries = get_image_bounds(
@@ -341,8 +267,8 @@ def random_tiled_image_from_census_tract(
 
         composition = np.dstack(stacks)
 
-        if to8bit:
-            composition = np.array(composition >> 6, dtype=np.uint8)
+        # if to8bit:
+        #     composition = np.array(composition >> 6, dtype=np.uint8)
 
     else:
         # print("Some tiles were not found. Image not generated...")
@@ -368,9 +294,6 @@ def process_image(img, resizing_size):
         img = cv2.resize(
             img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
         )
-    img = (
-        skimage.exposure.equalize_hist(img)
-    )  # FIXME: ¿equalizar imagen por imagen o el tileset entero?
 
     return img
 
