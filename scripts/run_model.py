@@ -109,7 +109,6 @@ def create_train_test_dataframes(small_sample=False):
 
     return df_train, df_test, sat_imgs_datasets
 
-
 def create_datasets(
     df_train,
     df_test,
@@ -117,7 +116,9 @@ def create_datasets(
     image_size,
     resizing_size,
     sample=1,
+    nbands=4,
     tiles=1,
+    stacked_images=[1],
     batch_size=32,
     save_examples=True,
 ):
@@ -136,9 +137,9 @@ def create_datasets(
         link_dataset = sat_img_dataset[df_subset.iloc[i]["dataset"]]
 
         # Generate the image
-        image, boundaries = utils.stacked_image_from_census_tract(link_dataset, polygon, image_size)
+        image, boundaries = utils.stacked_image_from_census_tract(link_dataset, polygon, image_size, n_bands=n_bands, stacked_images=stacked_images)
 
-        if image.shape == (8, image_size, image_size):
+        if image.shape == (nbands, image_size, image_size):
 
             # Assert that data corresponds to train or test
             is_correct_type = build_dataset.assert_train_test_datapoint(
@@ -146,7 +147,7 @@ def create_datasets(
             )
 
             if is_correct_type == False:  # If the point is not train/test, discard it
-                image = np.zeros(shape=(4,0,0))
+                image = np.zeros(shape=(nbands,0,0))
                 value = np.nan
                 return image, value
         
@@ -158,7 +159,7 @@ def create_datasets(
                 image = utils.augment_image(image)
 
         else:
-            image = np.zeros(shape=(1,1,1))
+            image = np.zeros(shape=(nbands,0,0))
             value = np.nan
     
         return image, value
@@ -330,7 +331,7 @@ def compute_custom_loss(
     all_real_values = np.empty((0))
 
     # Filtro Radios demasiado grandes (tardan horas en generar la cuadrícula y es puro campo...)
-    if trim_size:  # ACA
+    if trim_size: 
         df_test = df_test[df_test["AREA"] <= 200000]  # Remove rc that are too big
     links = df_test["link"].unique()
     # links = random.sample(links, 30)
@@ -355,7 +356,7 @@ def compute_custom_loss(
             )
             print("listo")
             if tiles == 1:
-                images, points, bounds = build_dataset.get_gridded_images_for_link(
+                images, bounds = build_dataset.get_gridded_images_for_link(
                     link_dataset,
                     df_test,
                     link,
@@ -365,19 +366,21 @@ def compute_custom_loss(
                     bias,
                     sample,
                     to8bit,
+                    n_bands=n_bands,
+                    stacked_images=stacked_images
                 )
-            else:  # If tiles >2 then the dataset is too big
-                images, points, bounds = build_dataset.get_random_images_for_link(
-                    link_dataset,
-                    df_test,
-                    link,
-                    tiles,
-                    size,
-                    resizing_size,
-                    bias,
-                    sample,
-                    to8bit,
-                )
+            # else:  # If tiles >2 then the dataset is too big
+            #     images, bounds = build_dataset.get_random_images_for_link(
+            #         link_dataset,
+            #         df_test,
+            #         link,
+            #         tiles,
+            #         size,
+            #         resizing_size,
+            #         bias,
+            #         sample,
+            #         to8bit,
+            #     )
             print("imagen generada")
             if len(images) == 0:
                 # No images where returned from this census tract, so no error to compute...
@@ -921,12 +924,12 @@ def plot_predictions_vs_real(df):
 
 
 def set_model_and_loss_function(
-    model_name: str, kind: str, image_size: int, resizing_size: int, weights: str
+    model_name: str, kind: str, resizing_size: int, weights: str, bands: int=4
 ):
     # Diccionario de modelos
     get_model_from_name = {
         "small_cnn": custom_models.small_cnn(resizing_size),  # kind=kind),
-        "mobnet_v3": custom_models.mobnet_v3(resizing_size, kind=kind, weights=weights),
+        "mobnet_v3": custom_models.mobnet_v3(resizing_size, bands=bands, kind=kind, weights=weights),
         # "resnet152_v2": custom_models.resnet152_v2(kind=kind, weights=weights),
         "effnet_v2_b2": custom_models.effnet_v2_b2(kind=kind, weights=weights),
         "effnet_v2_s": custom_models.effnet_v2_s(kind=kind, weights=weights),
@@ -972,6 +975,8 @@ def run(
     image_size=512,
     resizing_size=200,
     tiles=1,
+    nbands=4,
+    stacked_images=[1],
     sample_size=10,
     small_sample=False,
     n_epochs=100,
@@ -992,7 +997,7 @@ def run(
     model, loss, metrics = set_model_and_loss_function(
         model_name=model_name,
         kind=kind,
-        image_size=image_size,
+        bands=nbands*len(stacked_images),
         resizing_size=resizing_size,
         weights=weights,
     )
@@ -1011,6 +1016,8 @@ def run(
         sat_img_dataset=sat_img_dataset,
         image_size=image_size,
         resizing_size=resizing_size,
+        nbands=nbands,
+        stacked_images=stacked_images,
         tiles=tiles,
         sample=sample_size,
         batch_size=batch_size,

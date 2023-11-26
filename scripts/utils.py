@@ -139,11 +139,11 @@ def stacked_image_from_census_tract(dataset, polygon, img_size=100, n_bands=4, s
         image_da = image_from_point(dataset, point, image_size)
 
         try:   
-            image = image_da.to_numpy()[:,::size_multiplier,::size_multiplier]
+            image = image_da.to_numpy()[:n_bands,::size_multiplier,::size_multiplier]
             image = image.astype(np.uint8)
             images_to_stack += [image]
         except:
-            image = np.zeros(shape=(1,1,1))
+            image = np.zeros(shape=(n_bands,1,1))
             bounds = None
             return image, bounds
 

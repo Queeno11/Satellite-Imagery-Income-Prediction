@@ -51,12 +51,12 @@ def rebuild_top(model_base, kind="cla") -> Sequential:
     return model
 
 
-def mobnet_v3(resizing_size, kind="reg", weights=None) -> Sequential:
+def mobnet_v3(resizing_size, bands=4, kind="reg", weights=None) -> Sequential:
     """https://keras.io/api/applications/mobilenet_v3/#mobilenetv3small-function"""
 
     model_base = MobileNetV3Large(
         include_top=False,
-        input_shape=(resizing_size, resizing_size, 8),
+        input_shape=(resizing_size, resizing_size, bands),
         weights=None,
         include_preprocessing=False,
     )

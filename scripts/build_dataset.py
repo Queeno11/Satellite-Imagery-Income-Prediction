@@ -334,7 +334,7 @@ def crop_dataset_to_link(ds, icpag, link):
 
 
 def get_gridded_images_for_link(
-    ds, icpag, link, tiles, size, resizing_size, bias, sample, to8bit
+    ds, icpag, link, tiles, size, resizing_size, bias, sample, to8bit, n_bands=4, stacked_images=[1],
 ):
     """
     Itera sobre el bounding box del poligono del radio censal, tomando imagenes de tamño sizexsize
@@ -388,15 +388,13 @@ def get_gridded_images_for_link(
                 number_imgs = 0
                 counter = 0  # Limit the times to try to sample the images
                 while (number_imgs < sample) & (counter < sample * 2):
-                    img, point, bound, tbound = utils.random_image_from_census_tract(
-                        ds,
-                        icpag,
-                        link,
-                        start_point=image_point,
-                        tiles=tiles,
-                        size=size,
-                        bias=bias,
-                        to8bit=to8bit,
+                    polygon = icpag.at[icpag["link"]==link, "geometry"]
+                    img, bound = utils.stacked_image_from_census_tract(
+                        dataset=ds,
+                        polygon=polygon,
+                        img_size=size,
+                        n_bands=n_bands,
+                        stacked_images=stacked_images
                     )
 
                     counter += 1
@@ -407,12 +405,12 @@ def get_gridded_images_for_link(
                         img = utils.process_image(img, resizing_size)
 
                         images += [img]
-                        points += [point]
                         bounds += [bound]
                         number_imgs += 1
 
                     else:
                         print("Image failed")
+
     return images, points, bounds
 
 
