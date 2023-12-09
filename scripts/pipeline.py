@@ -8,7 +8,7 @@ from run_model import run
 ## Visualizar data augmentation
 
 ### PARAMETERS ###
-image_size = 128
+image_size = 128*2
 sample_size = 5
 resizing_size = 128
 tiles = 1
@@ -25,7 +25,7 @@ path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
 # )
 
 # Step 3: Train the Model
-initial_epoch = 0
+# initial_epoch = 249
 run(
     model_name=model,
     pred_variable=variable,
@@ -38,9 +38,9 @@ run(
     nbands=4,
     tiles=tiles,
     stacked_images=[1],
-    n_epochs=250,
+    n_epochs=500,
     # initial_epoch=initial_epoch,
-    # model_path=f"{path_repo}/data/data_out/models_by_epoch/{model}_size{image_size}_tiles{tiles}_sample5/{model}_size{image_size}_tiles{tiles}_sample5_{initial_epoch}",
+    # model_path=f"{path_repo}/data/data_out/models_by_epoch/{model}_size{image_size}_tiles{tiles}_sample5/{model}_size{image_size}_tiles{tiles}_sample{sample_size}_{initial_epoch}",
 )
 
 # if __name__ == "__main__":

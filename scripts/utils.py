@@ -126,13 +126,14 @@ def assert_image_is_valid(image_dataset, n_bands, size):
 
     return image, is_valid
 
-def stacked_image_from_census_tract(dataset, polygon, img_size=100, n_bands=4, stacked_images=[1,3]):
+def stacked_image_from_census_tract(dataset, polygon, point=None, img_size=100, n_bands=4, stacked_images=[1,3]):
     
     images_to_stack = []
     total_bands = n_bands*len(stacked_images)
 
-    # Sample point from the polygon's box
-    point = random_point_from_geometry(polygon)
+    if point is None:
+        # Sample point from the polygon's box
+        point = random_point_from_geometry(polygon)
     
     for size_multiplier in stacked_images:
         image_size = img_size*size_multiplier
@@ -284,10 +285,11 @@ def random_tiled_image_from_census_tract(
 
 
 
-def process_image(img, resizing_size):
-    img = np.moveaxis(
-        img, 0, 2
-    )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
+def process_image(img, resizing_size, moveaxis=True):
+    if moveaxis:
+        img = np.moveaxis(
+            img, 0, 2
+        )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
     
     image_size = img.shape[0]
     if image_size != resizing_size:

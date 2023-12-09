@@ -334,7 +334,7 @@ def crop_dataset_to_link(ds, icpag, link):
 
 
 def get_gridded_images_for_link(
-    ds, icpag, link, tiles, size, resizing_size, bias, sample, to8bit, n_bands=4, stacked_images=[1],
+    ds, icpag, link, tiles, size, resizing_size, sample, n_bands=4, stacked_images=[1],
 ):
     """
     Itera sobre el bounding box del poligono del radio censal, tomando imagenes de tamño sizexsize
@@ -381,24 +381,25 @@ def get_gridded_images_for_link(
             # Get the center point of the image
             image_point = (float(link_dataset.x[idx]), float(link_dataset.y[idy]))
             point_geom = sg.Point(image_point)
-
+            point = point_geom.coords[0]
+            
             # Check if the centroid of the image is within the original polygon:
             #   - if it is, then generate the n images
             if link_geometry.contains(point_geom):  # or intersects
                 number_imgs = 0
                 counter = 0  # Limit the times to try to sample the images
                 while (number_imgs < sample) & (counter < sample * 2):
-                    polygon = icpag.at[icpag["link"]==link, "geometry"]
+                    polygon = icpag.loc[icpag["link"]==link, "geometry"].item()
                     img, bound = utils.stacked_image_from_census_tract(
                         dataset=ds,
                         polygon=polygon,
+                        point=point,
                         img_size=size,
                         n_bands=n_bands,
                         stacked_images=stacked_images
                     )
 
                     counter += 1
-                    print(counter)
 
                     if img is not None:
                         # TODO: add a check to see if the image is contained in test bounds
@@ -753,7 +754,6 @@ def get_random_images_for_link(
             )
 
             counter += 1
-            print(counter)
 
             if img is not None:
                 # TODO: add a check to see if the image is contained in test bounds
