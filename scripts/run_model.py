@@ -658,7 +658,7 @@ def run(
     model, history = run_model(
         model_name=model_name,
         model_function=model,
-        lr=0.0001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
+        lr=0.00001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
         train_dataset=train_dataset,
         test_dataset=test_dataset,
         sample_size=sample_size,
