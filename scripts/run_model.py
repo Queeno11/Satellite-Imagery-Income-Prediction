@@ -25,7 +25,7 @@ path_imgs = env["PATH_IMGS"]
 # path_programas  = globales[7]
 ###############################################
 
-import prediction_tools
+import true_metrics
 import custom_models
 import build_dataset
 import utils
@@ -72,7 +72,7 @@ def enablePrint():
     sys.stdout = sys.__stdout__
 
 
-def create_train_test_dataframes(small_sample=False):
+def create_train_test_dataframes(savename, small_sample=False):
     """Create train and test dataframes with the links and xr.datasets to use for training and testing
 
     Load the ICPAG dataset and assign the links to the corresponding xr.dataset, then split the census tracts
@@ -107,12 +107,17 @@ def create_train_test_dataframes(small_sample=False):
     df_train = df[df["type"] == "train"].copy().reset_index(drop=True)
     assert df_train.shape[0] > 0, f"Empty train dataset!"
 
-    df_test.to_feather(rf"{path_dataout}/test_datasets/test_dataframe.feather")
-    print("Se creó el archivo:", rf"{path_dataout}/test_datasets/test_dataframe.feather")
-    df_train.to_feather(rf"{path_dataout}/train_datasets/train_dataframe.feather")
-    print("Se creó el archivo:", rf"{path_dataout}/train_datasets/train_dataframe.feather")
-    
+    df_test.to_feather(rf"{path_dataout}/test_datasets/{savename}_test_dataframe.feather")
+    print(
+        "Se creó el archivo:", rf"{path_dataout}/test_datasets/{savename}_test_dataframe.feather"
+    )
+    df_train.to_feather(rf"{path_dataout}/train_datasets/{savename}_train_dataframe.feather")
+    print(
+        "Se creó el archivo:", rf"{path_dataout}/train_datasets/{savename}_train_dataframe.feather"
+    )
+
     return df_train, df_test, sat_imgs_datasets
+
 
 def create_datasets(
     df_train,
@@ -125,6 +130,7 @@ def create_datasets(
     tiles=1,
     stacked_images=[1],
     batch_size=32,
+    savename="",
     save_examples=True,
 ):
     # Based on: https://medium.com/@acordier/tf-data-dataset-generators-with-parallelization-the-easy-way-b5c5f7d2a18
@@ -134,7 +140,10 @@ def create_datasets(
         i = i.numpy()
 
         if load:
-            df_train, df_test, sat_imgs_datasets = create_train_test_dataframes(small_sample=False)
+            df_train, df_test, sat_imgs_datasets = create_train_test_dataframes(
+                savename,
+                small_sample=False
+            )
 
         # Get link, dataset and indicator value of the corresponding index
         polygon = df_subset.iloc[i]["geometry"]
@@ -142,37 +151,42 @@ def create_datasets(
         link_dataset = sat_img_dataset[df_subset.iloc[i]["dataset"]]
 
         # Generate the image
-        image, boundaries = utils.stacked_image_from_census_tract(link_dataset, polygon, image_size, n_bands=nbands, stacked_images=stacked_images)
+        image, boundaries = utils.stacked_image_from_census_tract(
+            dataset=link_dataset,
+            polygon=polygon,
+            img_size=image_size,
+            n_bands=nbands,
+            stacked_images=stacked_images,
+        )
 
         if image.shape == (nbands, image_size, image_size):
-
             # Assert that data corresponds to train or test
             is_correct_type = build_dataset.assert_train_test_datapoint(
                 boundaries, wanted_type=type
             )
 
             if is_correct_type == False:  # If the point is not train/test, discard it
-                image = np.zeros(shape=(nbands,0,0))
+                image = np.zeros(shape=(nbands, 0, 0))
                 value = np.nan
                 return image, value
-        
-            # Reduce quality and process image 
+
+            # Reduce quality and process image
             image = utils.process_image(image, resizing_size=resizing_size)
 
             # Augment dataset
             if type == "train":
-                image = utils.augment_image(image)
-
+                # image = utils.augment_image(image)
+                image = image
         else:
-            image = np.zeros(shape=(nbands,0,0))
+            image = np.zeros(shape=(nbands, 0, 0))
             value = np.nan
-    
+
         return image, value
-    
+
     def get_train_data(i):
         image, value = get_data(i, df_train, type="train")
         return image, value
-    
+
     def get_test_data(i):
         image, value = get_data(i, df_test, type="test")
         return image, value
@@ -254,15 +268,15 @@ def create_datasets(
         i = 0
         print("saving train/test examples")
         for x in train_dataset.take(5):
-            np.save(f"{path_outputs}/train_example_{i}_imgs", tfds.as_numpy(x)[0])
-            np.save(f"{path_outputs}/train_example_{i}_labs", tfds.as_numpy(x)[1])
+            np.save(f"{path_outputs}/{savename}_train_example_{i}_imgs", tfds.as_numpy(x)[0])
+            np.save(f"{path_outputs}/{savename}_train_example_{i}_labs", tfds.as_numpy(x)[1])
             i += 1
         i = 0
         for x in test_dataset.take(5):
-            np.save(f"{path_outputs}/test_example_{i}_imgs", tfds.as_numpy(x)[0])
-            np.save(f"{path_outputs}/test_example_{i}_labs", tfds.as_numpy(x)[1])
+            np.save(f"{path_outputs}/{savename}_test_example_{i}_imgs", tfds.as_numpy(x)[0])
+            np.save(f"{path_outputs}/{savename}_test_example_{i}_labs", tfds.as_numpy(x)[1])
             i += 1
-    
+
     print()
     print("Dataset generado!")
 
@@ -274,6 +288,7 @@ def get_callbacks(
     loss: str,
     df_test: pd.DataFrame,
     sat_img_datasets: xr.Dataset,
+    savename,
     tiles,
     size,
     resizing_size,
@@ -342,17 +357,17 @@ def get_callbacks(
     # Create an instance of your custom callback
     custom_loss_callback = CustomLossCallback(log_dir=logdir)
 
-    # early_stopping_callback = EarlyStopping(
-    #     monitor="val_loss",
-    #     min_delta=0,  # the training is terminated as soon as the performance measure gets worse from one epoch to the next
-    #     patience=30,  # amount of epochs with no improvements until the model stops
-    #     verbose=2,
-    #     mode="auto",  # the model is stopped when the quantity monitored has stopped decreasing
-    #     restore_best_weights=True,  # restore the best model with the lowest validation error
-    # )
-    reduce_lr = keras.callbacks.ReduceLROnPlateau(
-        monitor="val_loss", factor=0.2, patience=10, min_lr=0.0000001
+    early_stopping_callback = EarlyStopping(
+        monitor="val_loss",
+        min_delta=0,  # the training is terminated as soon as the performance measure gets worse from one epoch to the next
+        patience=50,  # amount of epochs with no improvements until the model stops
+        verbose=2,
+        mode="auto",  # the model is stopped when the quantity monitored has stopped decreasing
+        restore_best_weights=True,  # restore the best model with the lowest validation error
     )
+    # reduce_lr = keras.callbacks.ReduceLROnPlateau(
+    #     monitor="val_loss", factor=0.2, patience=10, min_lr=0.0000001
+    # )
     savename = f"{model_name}_size{size}_tiles{tiles}_sample{train_sample}"
     model_checkpoint_callback = ModelCheckpoint(
         f"{path_dataout}/models/{savename}",
@@ -366,7 +381,7 @@ def get_callbacks(
     return [
         tensorboard_callback,
         # reduce_lr,
-        # early_stopping_callback,
+        early_stopping_callback,
         model_checkpoint_callback,
         custom_loss_callback,
     ]
@@ -426,9 +441,9 @@ def run_model(
         model = model_function
         model.summary()
         # keras.utils.plot_model(model, to_file=model_name + ".png", show_shapes=True)
-        optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
+        # optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
 
-        # optimizer = tf.keras.optimizers.Adam()
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
         # opt = tfa.optimizers.RectifiedAdam(learning_rate=lr)
         # # Nesterov Accelerated Gradient (NAG)
         # #   https://kyle-r-kieser.medium.com/tuning-your-keras-sgd-neural-network-optimizer-768536c7ef0
@@ -457,7 +472,7 @@ def run_model(
         callbacks=callbacks,
         workers=2,  # adjust this according to the number of CPU cores of your machine
     )
-
+    
     # model.evaluate(
     #     test_dataset,
     #     callbacks=callbacks,
@@ -516,12 +531,14 @@ def plot_predictions_vs_real(df):
 
 
 def set_model_and_loss_function(
-    model_name: str, kind: str, resizing_size: int, weights: str, bands: int=4
+    model_name: str, kind: str, resizing_size: int, weights: str, bands: int = 4
 ):
     # Diccionario de modelos
     get_model_from_name = {
         "small_cnn": custom_models.small_cnn(resizing_size),  # kind=kind),
-        "mobnet_v3": custom_models.mobnet_v3(resizing_size, bands=bands, kind=kind, weights=weights),
+        "mobnet_v3": custom_models.mobnet_v3(
+            resizing_size, bands=bands, kind=kind, weights=weights
+        ),
         # "resnet152_v2": custom_models.resnet152_v2(kind=kind, weights=weights),
         "effnet_v2_b2": custom_models.effnet_v2_b2(kind=kind, weights=weights),
         "effnet_v2_s": custom_models.effnet_v2_s(kind=kind, weights=weights),
@@ -569,11 +586,12 @@ def run(
     tiles=1,
     nbands=4,
     stacked_images=[1],
-    sample_size=10,
+    sample_size=1,
     small_sample=False,
     n_epochs=100,
     initial_epoch=0,
     model_path=None,
+    extra="",
 ):
     """Run all the code of this file.
 
@@ -583,23 +601,26 @@ def run(
         If you just want to check if the code is working, set small_sample to True, by default False
     """
     log_dir = f"{path_logs}/{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
     batch_size = 64
+
 
     ### Set Model & loss function
     model, loss, metrics = set_model_and_loss_function(
         model_name=model_name,
         kind=kind,
-        bands=nbands*len(stacked_images),
+        bands=nbands * len(stacked_images),
         resizing_size=resizing_size,
         weights=weights,
     )
 
     ### Create train and test dataframes from ICPAG
     df_train, df_test, sat_img_dataset = create_train_test_dataframes(
+        savename,
         small_sample=small_sample
     )
 
-    ### Transform dataframes into datagenerators:
+    ## Transform dataframes into datagenerators:
     #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
     print("Setting up data generators...")
     train_dataset, test_dataset = create_datasets(
@@ -613,6 +634,7 @@ def run(
         tiles=tiles,
         sample=sample_size,
         batch_size=batch_size,
+        savename=savename,
         save_examples=True,
     )
 
@@ -621,6 +643,7 @@ def run(
     callbacks = get_callbacks(
         model_name,
         loss,
+        savename=savename,
         df_test=df_test,
         sat_img_datasets=sat_img_dataset,
         tiles=tiles,
@@ -635,7 +658,7 @@ def run(
     model, history = run_model(
         model_name=model_name,
         model_function=model,
-        lr=0.0001,  # lr=0.00009 para mobnet_v3_20230823-141458
+        lr=0.0001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
         train_dataset=train_dataset,
         test_dataset=test_dataset,
         sample_size=sample_size,
@@ -646,4 +669,55 @@ def run(
         epochs=n_epochs,
         initial_epoch=initial_epoch,
         model_path=model_path,
+    )
+
+    # Export history # FIXME: fijarme si esto anda. Si anda, verificar que compute_true_loss funcione bien!!
+    hist_df = pd.DataFrame(history.history) 
+    hist_df.to_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
+    # hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
+
+    # Compute metrics
+    true_metrics.plot_results(
+        models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
+        savename=savename,
+        tiles=tiles,
+        size=image_size,
+        resizing_size=resizing_size,
+        n_epochs=n_epochs,
+        n_bands=nbands,
+        stacked_images=stacked_images,
+        generate=True,
+    )
+    
+if __name__ == "__main__":
+    image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
+    sample_size = 1
+    resizing_size = 128
+    tiles = 1
+
+    variable = "ln_pred_inc_mean"
+    kind = "reg"
+    model = "mobnet_v3"
+    path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
+
+    # Step 1: Run Pansharpening and Compression in QGIS to get the images in high resolution
+
+    # Step 3: Train the Model
+    # initial_epoch = 249
+    run(
+        model_name=model,
+        pred_variable=variable,
+        kind=kind,
+        small_sample=False,
+        weights=None,
+        image_size=image_size,
+        sample_size=sample_size,
+        resizing_size=resizing_size,
+        nbands=4,
+        tiles=tiles,
+        stacked_images=[1],
+        n_epochs=500,
+        # initial_epoch=initial_epoch,
+        # model_path=f"{path_repo}/data/data_out/models_by_epoch/{model}_size{image_size}_tiles{tiles}_sample5/{model}_size{image_size}_tiles{tiles}_sample{sample_size}_{initial_epoch}",
+        extra="_nostack",
     )

@@ -40,22 +40,18 @@ import utils
 def load_satellite_datasets(stretch=False):
     """Load satellite datasets and get their extents"""
 
-    files = os.listdir(rf"{path_satelites}/Pansharpened/2013")
-    assert os.path.isdir(rf"{path_satelites}/Pansharpened/2013")
+    files = os.listdir(rf"{path_satelites}/2013")
+    assert os.path.isdir(rf"{path_satelites}/2013")
     files = [f for f in files if f.endswith(".tif")]
-    assert all(
-        [os.path.isfile(rf"{path_satelites}/Pansharpened/2013/{f}") for f in files]
-    )
+    assert all([os.path.isfile(rf"{path_satelites}/2013/{f}") for f in files])
 
     datasets = {
-        f.replace(".tif", ""): (
-            xr.open_dataset(rf"{path_satelites}/Pansharpened/2013/{f}")
-        )
+        f.replace(".tif", ""): (xr.open_dataset(rf"{path_satelites}/2013/{f}"))
         for f in files
     }
     if stretch:
-        datasets = {name:stretch_dataset(ds) for name, ds in datasets.items()}
-        
+        datasets = {name: stretch_dataset(ds) for name, ds in datasets.items()}
+
     extents = {name: utils.get_dataset_extent(ds) for name, ds in datasets.items()}
 
     return datasets, extents
@@ -155,12 +151,13 @@ def split_train_test(df):
 
     return df
 
+
 def assert_train_test_datapoint(bounds, wanted_type="train"):
     min_x, _, max_x, _ = bounds  # Ignore min_y and max_y
 
     test_blocks = [(-58.71, -58.66), (-58.41, -58.36)]
 
-    for (test_min_x, test_max_x) in test_blocks:
+    for test_min_x, test_max_x in test_blocks:
         if test_min_x < min_x < max_x < test_max_x:
             # Inside test bloc
             return wanted_type == "test"
@@ -334,7 +331,15 @@ def crop_dataset_to_link(ds, icpag, link):
 
 
 def get_gridded_images_for_link(
-    ds, icpag, link, tiles, size, resizing_size, sample, n_bands=4, stacked_images=[1],
+    ds,
+    icpag,
+    link,
+    tiles,
+    size,
+    resizing_size,
+    sample,
+    n_bands=4,
+    stacked_images=[1],
 ):
     """
     Itera sobre el bounding box del poligono del radio censal, tomando imagenes de tamño sizexsize
@@ -382,30 +387,30 @@ def get_gridded_images_for_link(
             image_point = (float(link_dataset.x[idx]), float(link_dataset.y[idy]))
             point_geom = sg.Point(image_point)
             point = point_geom.coords[0]
-            
+
             # Check if the centroid of the image is within the original polygon:
             #   - if it is, then generate the n images
             if link_geometry.contains(point_geom):  # or intersects
                 number_imgs = 0
                 counter = 0  # Limit the times to try to sample the images
                 while (number_imgs < sample) & (counter < sample * 2):
-                    polygon = icpag.loc[icpag["link"]==link, "geometry"].item()
-                    img, bound = utils.stacked_image_from_census_tract(
+                    polygon = icpag.loc[icpag["link"] == link, "geometry"].item()
+                    image, bound = utils.stacked_image_from_census_tract(
                         dataset=ds,
                         polygon=polygon,
                         point=point,
                         img_size=size,
                         n_bands=n_bands,
-                        stacked_images=stacked_images
+                        stacked_images=stacked_images,
                     )
 
                     counter += 1
 
-                    if img is not None:
+                    if image.shape == (n_bands, size, size):
                         # TODO: add a check to see if the image is contained in test bounds
-                        img = utils.process_image(img, resizing_size)
+                        image = utils.process_image(image, resizing_size)
 
-                        images += [img]
+                        images += [image]
                         bounds += [bound]
                         number_imgs += 1
 
@@ -771,10 +776,11 @@ def get_random_images_for_link(
 
     return images, real_values, links, points, bounds
 
+
 def stretch_dataset(ds, pixel_depth=32_767):
-    ''' Stretch band data from satellite images. '''
-    minimum = ds.band_data.quantile(.01).values
-    maximum = ds.band_data.quantile(.99).values
+    """Stretch band data from satellite images."""
+    minimum = ds.band_data.quantile(0.01).values
+    maximum = ds.band_data.quantile(0.99).values
     ds = (ds - minimum) / (maximum - minimum) * pixel_depth
     ds = ds.where(ds.band_data > 0, 0)
     ds = ds.where(ds.band_data < pixel_depth, pixel_depth)
