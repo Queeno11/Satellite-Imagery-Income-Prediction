@@ -91,7 +91,7 @@ def generate_gridded_images(
     # Loop por radio censal. Si está la imagen la usa, sino la genera.
     os.makedirs(test_folder, exist_ok=True)
     for n, link in enumerate(links):
-        print(f"{link}: {n}/{len_links}")
+        # print(f"{link}: {n}/{len_links}")
         # Genera la imagen
         file = rf"{test_folder}/test_{link}.npy"
         link_dataset = build_dataset.get_dataset_for_link(
@@ -108,7 +108,7 @@ def generate_gridded_images(
             n_bands=n_bands,
             stacked_images=stacked_images
         )
-        print("imagen generada")
+        # print("imagen generada")
         if len(images) == 0:
             # No images where returned from this census tract, so no error to compute...
             print(f"problema con link {link}...")
@@ -540,7 +540,7 @@ def compute_custom_loss_all_epochs(
         )
         df_preds["error"] = df_preds["mean_prediction"] - df_preds["real_value"]
         df_preds["sq_error"] = df_preds["error"] ** 2
-        mse = df_preds.drop_duplicates(subset=["link"]).sq_error.mean()  
+        mse = df_preds.drop_duplicates(subset=["link"]).sq_error.mean()
         
         # enablePrint()
         print(f"Epoch {epoch}/{n_epochs}: True Mean Squared Error: {mse}")
@@ -659,17 +659,18 @@ def plot_results(
     plot_predictions_vs_real(metrics_epochs, savename, quantiles=True,  save=True)
 
 if __name__ == "__main__":
-    size = 130
+    size = 256
     tiles = 1
-    sample = 1
-    savename = f"mobnet_v3_size{size}_tiles{tiles}_sample{sample}"
+    sample = 10
+    extra ="_nostack"
+    savename = f"mobnet_v3_size{size}_tiles{tiles}_sample{sample}{extra}"
     plot_results(
         models_dir=rf"/mnt/d/Maestría/Tesis/Repo/data/data_out/models_by_epoch/{savename}",
         savename=savename,
         tiles=tiles,
         size=size,
         resizing_size=128,
-        n_epochs=2,
+        n_epochs=80,
         n_bands=4,
         stacked_images=[1],
         generate=True,

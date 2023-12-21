@@ -258,7 +258,7 @@ def create_datasets(
             )
 
         elif type == "test":
-            dataset = dataset.batch(batch_size_subset)
+            dataset = dataset.batch(batch_size_subset).repeat(10)
 
         tf_datasets += [dataset]
 
@@ -368,7 +368,6 @@ def get_callbacks(
     # reduce_lr = keras.callbacks.ReduceLROnPlateau(
     #     monitor="val_loss", factor=0.2, patience=10, min_lr=0.0000001
     # )
-    savename = f"{model_name}_size{size}_tiles{tiles}_sample{train_sample}"
     model_checkpoint_callback = ModelCheckpoint(
         f"{path_dataout}/models/{savename}",
         monitor="val_loss",
@@ -658,7 +657,7 @@ def run(
     model, history = run_model(
         model_name=model_name,
         model_function=model,
-        lr=0.00001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
+        lr=0.0001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
         train_dataset=train_dataset,
         test_dataset=test_dataset,
         sample_size=sample_size,
@@ -683,7 +682,7 @@ def run(
         tiles=tiles,
         size=image_size,
         resizing_size=resizing_size,
-        n_epochs=n_epochs,
+        n_epochs=hist_df.index.max(),
         n_bands=nbands,
         stacked_images=stacked_images,
         generate=True,
@@ -691,7 +690,7 @@ def run(
     
 if __name__ == "__main__":
     image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    sample_size = 1
+    sample_size = 10
     resizing_size = 128
     tiles = 1
 

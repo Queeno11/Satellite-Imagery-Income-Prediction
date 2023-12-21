@@ -54,7 +54,7 @@ def rebuild_top(model_base, kind="cla") -> Sequential:
 def mobnet_v3(resizing_size, bands=8, kind="reg", weights=None) -> Sequential:
     """https://keras.io/api/applications/mobilenet_v3/#mobilenetv3small-function"""
 
-    model_base = MobileNetV3Large(
+    model_base = MobileNetV3Small(
         include_top=False,
         input_shape=(resizing_size, resizing_size, bands),
         weights=None,
