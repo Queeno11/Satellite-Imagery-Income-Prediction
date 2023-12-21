@@ -35,20 +35,23 @@ import shapely.geometry as sg
 import pandas as pd
 from tqdm import tqdm
 import utils
+import true_metrics
 
-
-def load_satellite_datasets():
+def load_satellite_datasets(stretch=False):
     """Load satellite datasets and get their extents"""
 
-    files = os.listdir(rf"{path_datain}/Pansharpened/2013")
-    assert os.path.isdir(rf"{path_datain}/Pansharpened/2013")
+    files = os.listdir(rf"{path_satelites}/2013")
+    assert os.path.isdir(rf"{path_satelites}/2013")
     files = [f for f in files if f.endswith(".tif")]
-    assert all([os.path.isfile(rf"{path_datain}/Pansharpened/2013/{f}") for f in files])
+    assert all([os.path.isfile(rf"{path_satelites}/2013/{f}") for f in files])
 
     datasets = {
-        f.replace(".tif", ""): xr.open_dataset(rf"{path_datain}/Pansharpened/2013/{f}")
+        f.replace(".tif", ""): (xr.open_dataset(rf"{path_satelites}/2013/{f}"))
         for f in files
     }
+    if stretch:
+        datasets = {name: stretch_dataset(ds) for name, ds in datasets.items()}
+
     extents = {name: utils.get_dataset_extent(ds) for name, ds in datasets.items()}
 
     return datasets, extents
@@ -83,7 +86,7 @@ def assign_links_to_datasets(icpag, extents, verbose=True):
     warnings.filterwarnings("ignore")
 
     for name, bbox in extents.items():
-        icpag.loc[icpag.centroid.within(bbox), "dataset"] = name
+        icpag.loc[icpag.within(bbox), "dataset"] = name
 
     nan_links = icpag.dataset.isna().sum()
     icpag = icpag[icpag.dataset.notna()]
@@ -98,7 +101,7 @@ def assign_links_to_datasets(icpag, extents, verbose=True):
     return icpag
 
 
-def split_train_test(metadata):
+def split_train_test(df):
     """Blocks are counted from left to right, one count for test and one for train."""
 
     # Set bounds of test dataset blocks
@@ -108,57 +111,76 @@ def split_train_test(metadata):
     test2_min_x = -58.41
 
     # These blocks are the test dataset.
-    #   All the images have to be inside the test dataset blocks,
-    #   so the filter is based on x_min and x_max of the images.
-    metadata["type"] = np.nan
-    metadata.loc[
-        ((metadata.min_x > test1_min_x) & (metadata.max_x < test1_max_x))
-        | ((metadata.min_x > test2_min_x) & (metadata.max_x < test2_max_x)),
+    #   The hole image have to be inside the train region
+    df["type"] = np.nan
+    df.loc[
+        (
+            (df.min_x > test1_min_x) & (df.max_x < test1_max_x)
+        )  # Entre test1_minx y test1_maxx
+        | (
+            (df.min_x > test2_min_x) & (df.max_x < test2_max_x)
+        ),  # Entre test2_minx y test2_maxx
         "type",
     ] = "test"
 
-    ## Clean overlapping borders
-    # Get bounds of train dataset blocks
-    metadata.loc[metadata.x < test1_min_x, "train_block"] = 1
-    metadata.loc[
-        (metadata.x > test1_max_x) & (metadata.x < test2_min_x), "train_block"
-    ] = 2
-    metadata.loc[metadata.x > test2_max_x, "train_block"] = 3
-    print(metadata.train_block.value_counts())
+    # These blocks are the train dataset.
+    #   The hole image have to be inside the train region
+    df.loc[df.max_x < test1_min_x, "train_block"] = 1  # A la izqauierda de test1
+    df.loc[
+        (df.min_x > test1_max_x) & (df.max_x < test2_min_x), "train_block"
+    ] = 2  # Entre test1 y test2
+    df.loc[df.min_x > test2_max_x, "train_block"] = 3  # A la derecha de test2
+    # print(df.train_block.value_counts())
 
     # Put nans in the overlapping borders
-    metadata.loc[
-        ((metadata.train_block == 1) & (metadata.max_x < test1_min_x))
-        | (
-            (metadata.train_block == 2)
-            & (metadata.min_x > test1_max_x)
-            & (metadata.max_x < test2_min_x)
-        )
-        | ((metadata.train_block == 3) & (metadata.min_x > test2_max_x)),
-        "type",
-    ] = "train"
-    metadata = metadata.drop(columns="train_block")
+    df.loc[df.train_block.isin([1, 2, 3]), "type"] = "train"
+    df = df.drop(columns="train_block")
 
-    test_size = metadata[metadata.type == "test"].shape[0] / metadata.shape[0] * 100
-    train_size = metadata[metadata.type == "train"].shape[0] / metadata.shape[0] * 100
-    invalid_size = metadata[metadata.type.isna()].shape[0] / metadata.shape[0] * 100
+    test_size = df[df["type"] == "test"].shape[0]
+    train_size = df[df["type"] == "train"].shape[0]
+    invalid_size = df[df["type"].isna()].shape[0]
+    total_size = df["type"].shape[0]
+
     print(
-        f"Size of test dataset: {test_size:.2f}%\n",
-        f"Size of train dataset: {train_size:.2f}%\n",
-        f"Deleted images due to train/test overlapping: {invalid_size:.2f}%\n",
+        "",
+        f"Size of test dataset: {test_size/total_size*100:.2f}% ({test_size} census tracts)",
+        f"Size of train dataset: {train_size/total_size*100:.2f}% ({train_size} census tracts)",
+        f"Deleted images due to train/test overlapping: {invalid_size/total_size*100:.2f}% ({invalid_size} census tracts))",
+        sep="\n",
     )
 
-    return metadata
+    return df
 
 
-def assert_train_test_datapoint(point, bounds, wanted_type="train"):
-    """Blocks are counted from left to right, one count for test and one for train."""
+def assert_train_test_datapoint(bounds, wanted_type="train"):
+    min_x, _, max_x, _ = bounds  # Ignore min_y and max_y
+
+    test_blocks = [(-58.71, -58.66), (-58.41, -58.36)]
+
+    for test_min_x, test_max_x in test_blocks:
+        if test_min_x < min_x < max_x < test_max_x:
+            # Inside test bloc
+            return wanted_type == "test"
+        elif max_x < test_min_x:
+            return wanted_type == "train"
+        elif test_max_x < min_x < max_x:
+            return wanted_type == "train"
+        elif max_x < test_max_x:
+            return wanted_type == "train"
+
+    return False
+
+
+def assert_train_test_datapoint(bounds, wanted_type="train"):
+    """Returns True if the datapoint is of the wanted type (train or test)."""
 
     # Split bounds:
-    min_x = bounds[0]
-    max_x = bounds[2]
+    min_x, _, max_x, _ = bounds
+    # min_x = bounds[0]
+    # max_x = bounds[1]
 
     # Set bounds of test dataset blocks
+    #    Note: Blocks are counted from left to right, one count for test and one for train.
     test1_max_x = -58.66
     test1_min_x = -58.71
     test2_max_x = -58.36
@@ -173,21 +195,19 @@ def assert_train_test_datapoint(point, bounds, wanted_type="train"):
     ):
         type = "test"
 
-    ## Clean overlapping borders
-    # Get bounds of train dataset blocks
-    if point[0] < test1_min_x:
+    # These blocks are the train dataset.
+    #   The hole image have to be inside the train region
+    if max_x < test1_min_x:
         train_block = 1
-    elif (point[0] > test1_max_x) & (point[0] < test2_min_x):
+    elif (min_x > test1_max_x) & (max_x < test2_min_x):
         train_block = 2
-    elif point[0] > test2_max_x:
+    elif min_x > test2_max_x:
         train_block = 3
+    else:
+        train_block = None
 
     # Put nans in the overlapping borders
-    if (train_block == 1) & (max_x < test1_min_x):
-        type = "train"
-    elif (train_block == 2) & (min_x > test1_max_x) & (max_x < test2_min_x):
-        type = "train"
-    elif (train_block == 3) & (min_x > test2_max_x):
+    if (train_block == 1) | (train_block == 2) | (train_block == 3):
         type = "train"
 
     # Assert type
@@ -195,6 +215,7 @@ def assert_train_test_datapoint(point, bounds, wanted_type="train"):
         istype = True
     else:
         istype = False
+
     return istype
 
 
@@ -310,7 +331,15 @@ def crop_dataset_to_link(ds, icpag, link):
 
 
 def get_gridded_images_for_link(
-    ds, icpag, link, tiles, size, resizing_size, bias, sample, to8bit
+    ds,
+    icpag,
+    link,
+    tiles,
+    size,
+    resizing_size,
+    sample,
+    n_bands=4,
+    stacked_images=[1],
 ):
     """
     Itera sobre el bounding box del poligono del radio censal, tomando imagenes de tamño sizexsize
@@ -357,6 +386,7 @@ def get_gridded_images_for_link(
             # Get the center point of the image
             image_point = (float(link_dataset.x[idx]), float(link_dataset.y[idy]))
             point_geom = sg.Point(image_point)
+            point = point_geom.coords[0]
 
             # Check if the centroid of the image is within the original polygon:
             #   - if it is, then generate the n images
@@ -364,31 +394,29 @@ def get_gridded_images_for_link(
                 number_imgs = 0
                 counter = 0  # Limit the times to try to sample the images
                 while (number_imgs < sample) & (counter < sample * 2):
-                    img, point, bound, tbound = utils.random_image_from_census_tract(
-                        ds,
-                        icpag,
-                        link,
-                        start_point=image_point,
-                        tiles=tiles,
-                        size=size,
-                        bias=bias,
-                        to8bit=to8bit,
+                    polygon = icpag.loc[icpag["link"] == link, "geometry"].item()
+                    image, bound = utils.stacked_image_from_census_tract(
+                        dataset=ds,
+                        polygon=polygon,
+                        point=point,
+                        img_size=size,
+                        n_bands=n_bands,
+                        stacked_images=stacked_images,
                     )
 
                     counter += 1
-                    print(counter)
 
-                    if img is not None:
+                    if image.shape == (n_bands, size, size):
                         # TODO: add a check to see if the image is contained in test bounds
-                        img = utils.process_image(img, resizing_size)
+                        image = utils.process_image(image, resizing_size)
 
-                        images += [img]
-                        points += [point]
+                        images += [image]
                         bounds += [bound]
                         number_imgs += 1
 
                     else:
                         print("Image failed")
+
     return images, points, bounds
 
 
@@ -531,142 +559,183 @@ def get_gridded_images_for_dataset(
 
 
 def get_gridded_images_for_grid(
-    model, ds, icpag, tiles, size, resizing_size, bias, sample, to8bit
+    model, datasets, icpag, size, resizing_size, n_bands
 ):
     """
-    Itera sobre el bounding box de un dataset (raster de imagenes), tomando imagenes de tamño sizexsize
-    Asigna el valor "real" del radio censal al que pertenece el centroide de la imagen.
-    Devuelve un array con todas las imagenes generadas, un array con los puntos centrales de cada imagen,
-    un array con los valores "reales" de los radios censales y un array con los bounding boxes de cada imagen.
+    Generate gridded predictions for a given GeoDataFrame grid using a machine learning model.
 
     Parameters:
-    -----------
-    ds: xarray.Dataset, dataset con las imágenes de satélite
-    icpag: geopandas.GeoDataFrame, shapefile con los radios censales
-    tiles: int, cantidad de imágenes a generar por lado
-    size: int, tamaño de la imagen a generar, en píxeles
-    resizing_size: int, tamaño al que se redimensiona la imagen
-    bias: int, cantidad de píxeles que se mueve el punto aleatorio de las tiles
-    sample: int, cantidad de imágenes a generar por box (util cuando tiles > 1)
-    to8bit: bool, si es True, convierte la imagen a 8 bits
+    - model (keras.Model): Trained machine learning model for image prediction.
+    - datasets (dict): Dictionary containing xarray.Datasets for image generation (the original satellite images).
+    - icpag (geopandas.GeoDataFrame): GeoDataFrame with census tract data.
+    - size (int): Size of each image.
+    - resizing_size (int): Size to which the images will be resized.
+    - n_bands (int): Number of bands in the image.
+    - tiles (int): Number of tiles. -- deprecated
+    - sample: (int): Sample parameter description. -- deprecated
 
     Returns:
-    --------
-    images: list, lista con las imágenes generadas
-    points: list, lista con los puntos centrales de cada imagen
-    bounds: list, lista con los bounding boxes de cada imagen
+    - gridded_predictions (geopandas.GeoDataFrame): GeoDataFrame containing gridded predictions and data 
+    from the corresponding census tract.
     """
+    
     import run_model
+    from tqdm import tqdm
     from shapely.geometry import Polygon
 
-    # FIXME: algunos radios censales no se generan bien. Ejemplo: 065150101. ¿Que pasa ahi?
+    def remove_sea_from_grid(grid):
+        
+        # Get the regio of interest
+        amba_costa = load_roi_coast_data(grid)
+        # Remove non relevant cells from grid
+        is_relevant = grid.set_crs(epsg=4326, allow_override=True).within(amba_costa)
+        grid = grid[is_relevant]
+
+        return grid
+
+    def load_roi_coast_data(grid):
+
+        from shapely import Polygon
+        
+        # Load país
+        pais = gpd.read_file(
+            rf"{path_datain}/Limites Argentina/pais.shp"
+        )        
+        # Get grid exterior
+        exterior = Polygon([
+            grid.total_bounds[[0, 1]],
+            grid.total_bounds[[2, 1]],
+            grid.total_bounds[[2, 3]],
+            grid.total_bounds[[0, 3]],
+            grid.total_bounds[[0, 1]],
+        ])        
+        # Clip
+        amba_costa = pais.clip(exterior)
+        # amba_costa.plot()
+        # Simplify
+        amba_costa.geometry = amba_costa.geometry.simplify(.001)
+        
+        return amba_costa.geometry.item() # Polygon with amba bounds
+    
+    def restrict_grid_to_ICPAG_area(grid, icpag):
+
+        from shapely import Polygon
+        
+        # Get convex hull of icpag
+        exterior = icpag.geometry.unary_union.convex_hull
+        
+        # Clip
+        grid = grid[grid.centroid.within(exterior)]    
+        
+        return grid # Polygon with amba bounds
+    
     # Inicializo arrays
     batch_images = np.empty((0, resizing_size, resizing_size, 4))
     batch_link_names = np.empty((0))
     batch_predictions = np.empty((0))
     batch_real_values = np.empty((0))
-    batch_bounds = np.empty((0))
+    batch_id_points = np.empty((0))
+    
     all_link_names = np.empty((0))
     all_predictions = np.empty((0))
     all_real_values = np.empty((0))
-    all_bounds = np.empty((0))
+    all_id_points = np.empty((0))
 
-    tile_size = size // tiles
-    tiles_generated = 0
-
+    # Open grid of polygons for the corresponding parameters:
+    grid = gpd.read_parquet(
+        rf"{path_datain}/Grillas/grid_size{size}_tiles1.parquet"
+    )
+    grid = restrict_grid_to_ICPAG_area(grid, icpag)
+    grid = remove_sea_from_grid(grid)
+    print("data ready")
     # Iterate over the center points of each image:
     # - Start point is the center of the image (tile_size / 2, start_index)
     # - End point is the maximum possible center point (link_dataset.y.size)
     # - Step is the size of each image (tile_size)
 
-    # FIXME: para mejorar la eficiencia, convendría hacer un dissolve de icpag y verificar que
-    # point_geom este en ese polygono y no en todo el df
-    start_index = int(tile_size / 2)
-    for idy in range(start_index, ds.y.size, tile_size):
-        # Iterate over columns
-        for idx in range(start_index, ds.x.size, tile_size):
-            # Get the center point of the image
-            image_point = (float(ds.x[idx]), float(ds.y[idy]))
-            point_geom = sg.Point(image_point)
+    grid["point"] = grid.centroid
+    for index, row in tqdm(grid[["id","point"]].iterrows()):
+        id_point, raster_point = row
 
-            # Get data for selected point
-            radio_censal = icpag.loc[icpag.contains(point_geom)]
-            if radio_censal.empty:
-                # El radio censal no existe, es el medio del mar...
-                continue
+        # Get data for selected point
+        radio_censal = icpag.loc[icpag.contains(raster_point)]
+        if radio_censal.empty:
+            # El radio censal no existe, es el medio del mar...
+            continue
+        
+        raster_point = (raster_point.x, raster_point.y)
+        real_value = radio_censal["var"].values[0]
+        link_name = radio_censal["link"].values[0]
+        link_dataset = get_dataset_for_link(icpag, datasets, link_name)
 
-            real_value = radio_censal["var"].values[0]
-            link_name = radio_censal["link"].values[0]
+        # Check if the centroid of the image is within the original polygon:
+        #   - if it is, then generate the n images
+        image_da = utils.image_from_point(link_dataset, raster_point, img_size=size)
 
-            # Check if the centroid of the image is within the original polygon:
-            #   - if it is, then generate the n images
+        if image_da.shape == (n_bands, size, size):
 
-            image, point, bound, tbound = utils.random_image_from_census_tract(
-                ds,
-                icpag,
-                link_name,
-                start_point=image_point,
-                tiles=tiles,
-                size=size,
-                bias=bias,
-                to8bit=to8bit,
+            # Process iamge
+            image = image_da.to_numpy()[:n_bands,::size,::size]
+            image = image.astype(np.uint8)
+            image = utils.process_image(image, resizing_size)
+            # add to batches
+            batch_images = np.concatenate([batch_images, np.array([image])], axis=0)
+            batch_link_names = np.concatenate(
+                [batch_link_names, np.array([link_name])], axis=0
+            )
+            batch_real_values = np.concatenate(
+                [batch_real_values, np.array([real_value])], axis=0
+            )
+            batch_id_points = np.concatenate(
+                [batch_id_points, np.array([id_point])], axis=0
             )
 
-            if image is not None:
-                image = utils.process_image(image, resizing_size)
-                geom_bound = Polygon(
-                    bound[0]
-                )  # Create polygon of the shape of the image
+        else:
+            print("error en imagen:", id_point)
+            
 
-                batch_images = np.concatenate([batch_images, np.array([image])], axis=0)
-                batch_link_names = np.concatenate(
-                    [batch_link_names, np.array([link_name])], axis=0
-                )
-                batch_real_values = np.concatenate(
-                    [batch_real_values, np.array([real_value])], axis=0
-                )
-                batch_bounds = np.concatenate(
-                    [batch_bounds, np.array([geom_bound])], axis=0
-                )
+        # predict with the model over the batch
+        if batch_images.shape[0] == 1024: # 128 is the batch size
+            # predictions
+            batch_predictions = true_metrics.get_batch_predictions(model, batch_images)
 
-                # predict with the model over the batch
-                if batch_images.shape[0] == 128:
-                    # predictions
-                    batch_predictions = run_model.get_batch_predictions(
-                        model, batch_images
-                    )
+            # Store data
+            all_predictions = np.concatenate(
+                [all_predictions, batch_predictions], axis=0
+            )
+            all_link_names = np.concatenate(
+                [all_link_names, batch_link_names], axis=0
+            )
+            all_real_values = np.concatenate(
+                [all_real_values, batch_real_values], axis=0
+            )
+            all_id_points = np.concatenate(
+                [all_id_points, batch_id_points], axis=0
+            )
 
-                    # Store data
-                    all_predictions = np.concatenate(
-                        [all_predictions, batch_predictions], axis=0
-                    )
-                    all_link_names = np.concatenate(
-                        [all_link_names, batch_link_names], axis=0
-                    )
-                    all_real_values = np.concatenate(
-                        [all_real_values, batch_real_values], axis=0
-                    )
-                    all_bounds = np.concatenate([all_bounds, batch_bounds], axis=0)
-
-                    # Restore batches to empty
-                    batch_images = np.empty((0, resizing_size, resizing_size, 4))
-                    batch_predictions = np.empty((0))
-                    batch_link_names = np.empty((0))
-                    batch_predictions = np.empty((0))
-                    batch_real_values = np.empty((0))
-                    batch_bounds = np.empty((0))
+            # Restore batches to empty
+            batch_images = np.empty((0, resizing_size, resizing_size, 4))
+            batch_predictions = np.empty((0))
+            batch_link_names = np.empty((0))
+            batch_predictions = np.empty((0))
+            batch_real_values = np.empty((0))
+            batch_id_points = np.empty((0))
 
     # Creo dataframe para exportar:
     d = {
         "link": all_link_names,
-        "predictions": all_predictions,
-        "real_value": all_real_values,
+        "prediction": all_predictions,
+        "link_actual_value": all_real_values,
+        "prediction_error": (all_real_values - all_predictions), 
+        "id": all_id_points,
     }
 
-    df_preds = gpd.GeoDataFrame(d, geometry=all_bounds, crs="epsg:4326")
+    df_preds = pd.DataFrame(d)
+    df_preds.to_csv("test.csv")
+    gridded_predictions = grid[["id","geometry"]].merge(df_preds, on="id")
+    gridded_predictions = gridded_predictions.set_crs(epsg=4326, allow_override=True)
 
-    return df_preds
-
+    return gridded_predictions
 
 def get_random_images_for_link(
     ds, icpag, link, tiles, size, resizing_size, bias, sample, to8bit
@@ -731,7 +800,6 @@ def get_random_images_for_link(
             )
 
             counter += 1
-            print(counter)
 
             if img is not None:
                 # TODO: add a check to see if the image is contained in test bounds
@@ -748,6 +816,16 @@ def get_random_images_for_link(
     return images, points, bounds
 
     return images, real_values, links, points, bounds
+
+
+def stretch_dataset(ds, pixel_depth=32_767):
+    """Stretch band data from satellite images."""
+    minimum = ds.band_data.quantile(0.01).values
+    maximum = ds.band_data.quantile(0.99).values
+    ds = (ds - minimum) / (maximum - minimum) * pixel_depth
+    ds = ds.where(ds.band_data > 0, 0)
+    ds = ds.where(ds.band_data < pixel_depth, pixel_depth)
+    return ds
 
 
 if __name__ == "__main__":

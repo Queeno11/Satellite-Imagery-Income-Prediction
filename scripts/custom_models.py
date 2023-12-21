@@ -33,7 +33,13 @@ def rebuild_top(model_base, kind="cla") -> Sequential:
 
     # Rebuild top
     model.add(layers.GlobalAveragePooling2D(name="avg_pool"))
+    # FIXME: en el codigo original de keras, esto es un Conv2D-relu-dropout-conv2d-flatten-dense
+    #   based on: https://machinelearningmastery.com/how-to-use-transfer-learning-when-developing-convolutional-neural-network-models/
     model.add(layers.BatchNormalization())
+    model.add(layers.Flatten())
+    model.add(layers.Dropout(0.2))
+    model.add(layers.Dense(1024, name="last_fc", activation="relu"))
+
     if kind == "cla":
         # Add fully conected layers
         # model.add(layers.Dense(2048, name="fc1", activation="relu"))
@@ -45,12 +51,12 @@ def rebuild_top(model_base, kind="cla") -> Sequential:
     return model
 
 
-def mobnet_v3(resizing_size, kind="reg", weights=None) -> Sequential:
+def mobnet_v3(resizing_size, bands=8, kind="reg", weights=None) -> Sequential:
     """https://keras.io/api/applications/mobilenet_v3/#mobilenetv3small-function"""
 
-    model_base = MobileNetV3Large(
+    model_base = MobileNetV3Small(
         include_top=False,
-        input_shape=(resizing_size, resizing_size, 4),
+        input_shape=(resizing_size, resizing_size, bands),
         weights=None,
         include_preprocessing=False,
     )
