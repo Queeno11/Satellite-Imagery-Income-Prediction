@@ -47,6 +47,7 @@ from tensorflow.keras.callbacks import (
     TensorBoard,
     EarlyStopping,
     ModelCheckpoint,
+    CSVLogger
 )
 from tensorflow.keras.models import Sequential
 import cv2
@@ -375,13 +376,15 @@ def get_callbacks(
         save_best_only=True,  # save the best model
         mode="auto",
         save_freq="epoch",  # save every epoch
-    )  # saving eff_net takes quite a bit of time
+    ) 
+    csv_logger = CSVLogger(f"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv", append=True)
 
     return [
         tensorboard_callback,
         # reduce_lr,
-        early_stopping_callback,
+        # early_stopping_callback,
         model_checkpoint_callback,
+        csv_logger,
         custom_loss_callback,
     ]
 
@@ -669,13 +672,9 @@ def run(
         initial_epoch=initial_epoch,
         model_path=model_path,
     )
-
-    # Export history # FIXME: fijarme si esto anda. Si anda, verificar que compute_true_loss funcione bien!!
-    hist_df = pd.DataFrame(history.history) 
-    hist_df.to_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
-    # hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
-
+            
     # Compute metrics
+    hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
     true_metrics.plot_results(
         models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
         savename=savename,
@@ -690,7 +689,7 @@ def run(
     
 if __name__ == "__main__":
     image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    sample_size = 10
+    sample_size = 1
     resizing_size = 128
     tiles = 1
 
@@ -698,11 +697,11 @@ if __name__ == "__main__":
     kind = "reg"
     model = "mobnet_v3"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-
+    extra = "_nostack"
     # Step 1: Run Pansharpening and Compression in QGIS to get the images in high resolution
 
     # Step 3: Train the Model
-    # initial_epoch = 249
+    initial_epoch = 141
     run(
         model_name=model,
         pred_variable=variable,
@@ -715,8 +714,9 @@ if __name__ == "__main__":
         nbands=4,
         tiles=tiles,
         stacked_images=[1],
-        n_epochs=500,
-        # initial_epoch=initial_epoch,
-        # model_path=f"{path_repo}/data/data_out/models_by_epoch/{model}_size{image_size}_tiles{tiles}_sample5/{model}_size{image_size}_tiles{tiles}_sample{sample_size}_{initial_epoch}",
+        n_epochs=1000,
+        initial_epoch=initial_epoch,
+        model_path=f"{path_repo}/data/data_out/models_by_epoch/{model}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}/{model}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}_{initial_epoch}",
         extra="_nostack",
     )
+    # FIXME: cuando se cae la corrida, la history se pierde...
