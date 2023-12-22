@@ -658,20 +658,134 @@ def plot_results(
     plot_predictions_vs_real(metrics_epochs, savename, quantiles=False, save=True)
     plot_predictions_vs_real(metrics_epochs, savename, quantiles=True,  save=True)
 
-if __name__ == "__main__":
-    size = 256
-    tiles = 1
-    sample = 10
-    extra ="_nostack"
-    savename = f"mobnet_v3_size{size}_tiles{tiles}_sample{sample}{extra}"
+
+def rerun_train_val_metrics(    
+    model_name: str,
+    pred_variable: str,
+    kind: str,
+    weights=None,
+    image_size=512,
+    resizing_size=200,
+    tiles=1,
+    nbands=4,
+    stacked_images=[1],
+    sample_size=1,
+    small_sample=False,
+    n_epochs=100,
+    initial_epoch=0,
+    model_path=None,
+    extra="",
+):
+    import run_model
+    from keras.metrics import MeanSquaredError
+    
+    savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
+    batch_size = 64
+
+    ### Create train and test dataframes from ICPAG
+    df_train, df_test, sat_img_dataset = run_model.create_train_test_dataframes(
+        savename,
+        small_sample=small_sample
+    )
+
+    ## Transform dataframes into datagenerators:
+    #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
+    print("Setting up data generators...")
+    train_dataset, test_dataset = run_model.create_datasets(
+        df_train=df_train,
+        df_test=df_test,
+        sat_img_dataset=sat_img_dataset,
+        image_size=image_size,
+        resizing_size=resizing_size,
+        nbands=nbands,
+        stacked_images=stacked_images,
+        tiles=tiles,
+        sample=sample_size,
+        batch_size=batch_size,
+        savename=savename,
+        save_examples=True,
+    )
+    
+    store_dict = {"loss":[],"mean_absolute_error":[],"mean_squared_error":[],"val_loss":[],"val_mean_absolute_error":[],"val_mean_squared_error":[]}
+    for epoch in range(n_epochs):
+        
+        print("Epoch", epoch+1)       
+        model = keras.models.load_model(f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}")  # load the model from file
+
+        losses = model.evaluate(train_dataset, steps=10000 * sample_size / batch_size)
+        store_dict["loss"] += [losses[0]]
+        store_dict["mean_absolute_error"] += [losses[1]]
+        store_dict["mean_squared_error"] += [losses[2]]
+
+        losses = model.evaluate(test_dataset)
+        store_dict["val_loss"] += [losses[0]]
+        store_dict["val_mean_absolute_error"] += [losses[1]]
+        store_dict["val_mean_squared_error"] += [losses[2]]
+        
+    history = pd.DataFrame().from_dict(store_dict)
+    history.to_csv(f"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
+     
+    # Compute metrics
+    hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
     plot_results(
-        models_dir=rf"/mnt/d/Maestría/Tesis/Repo/data/data_out/models_by_epoch/{savename}",
+        models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
         savename=savename,
         tiles=tiles,
-        size=size,
-        resizing_size=128,
-        n_epochs=80,
-        n_bands=4,
-        stacked_images=[1],
+        size=image_size,
+        resizing_size=resizing_size,
+        n_epochs=hist_df.index.max(),
+        n_bands=nbands,
+        stacked_images=stacked_images,
         generate=True,
+    )
+
+    return
+
+if __name__ == "__main__":
+    # size = 256
+    # tiles = 1
+    # sample = 10
+    # extra ="_nostack"
+    # savename = f"mobnet_v3_size{size}_tiles{tiles}_sample{sample}{extra}"
+    # plot_results(
+    #     models_dir=rf"/mnt/d/Maestría/Tesis/Repo/data/data_out/models_by_epoch/{savename}",
+    #     savename=savename,
+    #     tiles=tiles,
+    #     size=size,
+    #     resizing_size=128,
+    #     n_epochs=80,
+    #     n_bands=4,
+    #     stacked_images=[1],
+    #     generate=True,
+    # )
+    image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
+    sample_size = 10
+    resizing_size = 128
+    tiles = 1
+
+    variable = "ln_pred_inc_mean"
+    kind = "reg"
+    model = "mobnet_v3"
+    path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
+    extra = "_nostack"
+    # Step 1: Run Pansharpening and Compression in QGIS to get the images in high resolution
+
+    # Step 3: Train the Model
+    initial_epoch = 141
+    rerun_train_val_metrics(    
+        model_name=model,
+        pred_variable=variable,
+        kind=kind,
+        small_sample=False,
+        weights=None,
+        image_size=image_size,
+        sample_size=sample_size,
+        resizing_size=resizing_size,
+        nbands=4,
+        tiles=tiles,
+        stacked_images=[1],
+        n_epochs=1000,
+        initial_epoch=initial_epoch,
+        model_path=f"{path_repo}/data/data_out/models_by_epoch/{model}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}/{model}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}_{initial_epoch}",
+        extra="_nostack",
     )
