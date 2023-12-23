@@ -707,7 +707,7 @@ def rerun_train_val_metrics(
     )
     
     store_dict = {"loss":[],"mean_absolute_error":[],"mean_squared_error":[],"val_loss":[],"val_mean_absolute_error":[],"val_mean_squared_error":[]}
-    for epoch in range(n_epochs):
+    for epoch in range(0, n_epochs, 10):
         
         print("Epoch", epoch+1)       
         model = keras.models.load_model(f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}")  # load the model from file
