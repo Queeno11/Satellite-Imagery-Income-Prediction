@@ -297,7 +297,6 @@ def get_gridded_predictions_for_grid(
     }
 
     df_preds = pd.DataFrame(d)
-    df_preds.to_csv("test.csv")
     gridded_predictions = grid[["id","geometry"]].merge(df_preds, on="id")
     gridded_predictions = gridded_predictions.set_crs(epsg=4326, allow_override=True)
 
@@ -886,13 +885,18 @@ def rerun_train_val_metrics(
         save_examples=True,
     )
     
-    store_dict = {"loss":[],"mean_absolute_error":[],"mean_squared_error":[],"val_loss":[],"val_mean_absolute_error":[],"val_mean_squared_error":[]}
-    for epoch in range(0, n_epochs, 10):
-        
+    # Compute metrics
+    # Check if the CSV file exists, if not, create it with the column names
+    csv_history_path = f"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv"
+    store_dict = {"epoch":[], "loss":[],"mean_absolute_error":[],"mean_squared_error":[],"val_loss":[],"val_mean_absolute_error":[],"val_mean_squared_error":[]}
+    pd.DataFrame(columns=store_dict.keys()).to_csv(csv_history_path, index=False)
+
+    for epoch in range(0, n_epochs, 5):
         print("Epoch", epoch+1)       
+        store_dict["epoch"] = epoch
         model = keras.models.load_model(f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}")  # load the model from file
 
-        losses = model.evaluate(train_dataset, steps=10000 * sample_size / batch_size)
+        losses = model.evaluate(train_dataset, steps=10_000 * sample_size / batch_size)
         store_dict["loss"] += [losses[0]]
         store_dict["mean_absolute_error"] += [losses[1]]
         store_dict["mean_squared_error"] += [losses[2]]
@@ -902,11 +906,14 @@ def rerun_train_val_metrics(
         store_dict["val_mean_absolute_error"] += [losses[1]]
         store_dict["val_mean_squared_error"] += [losses[2]]
         
-    history = pd.DataFrame().from_dict(store_dict)
-    history.to_csv(f"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
-     
-    # Compute metrics
-    hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
+        history = pd.DataFrame().from_dict(store_dict)
+        history.to_csv(csv_history_path, mode='a', header=False, index=False)
+        store_dict = {"epoch":[], "loss":[],"mean_absolute_error":[],"mean_squared_error":[],"val_loss":[],"val_mean_absolute_error":[],"val_mean_squared_error":[]}
+
+    # Plot metrics - Seteo bien el indice
+    hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv").set_index("epoch")
+    hist_df.to_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
+    
     plot_results(
         models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
         savename=savename,
@@ -948,9 +955,7 @@ if __name__ == "__main__":
     model = "mobnet_v3"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
     extra = "_nostack"
-    # Step 1: Run Pansharpening and Compression in QGIS to get the images in high resolution
-
-    # Step 3: Train the Model
+    
     initial_epoch = 141
     rerun_train_val_metrics(    
         model_name=model,
@@ -964,7 +969,7 @@ if __name__ == "__main__":
         nbands=4,
         tiles=tiles,
         stacked_images=[1],
-        n_epochs=1000,
+        n_epochs=99,
         initial_epoch=initial_epoch,
         model_path=f"{path_repo}/data/data_out/models_by_epoch/{model}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}/{model}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}_{initial_epoch}",
         extra="_nostack",

@@ -96,7 +96,7 @@ def gdf_plot_example(gdf, var, poly, ax, vmin=None, vmax=None):
     ax.set_ylim(y_min, y_max)
     
     
-def plot_example(bbox, modelname, datasets, extents, img_savename):
+def plot_example(bbox, modelname, datasets, extents, best_epoch, img_savename):
     
     # BBox a poligono
     poly = to_square(Polygon(bbox))
@@ -105,7 +105,7 @@ def plot_example(bbox, modelname, datasets, extents, img_savename):
     name = utils.get_dataset_for_polygon(poly, extents)
 
     ds = datasets[name] 
-    prediction = gpd.read_parquet(f"{path_dataout}/gridded_predictions/{modelname}/{name}.parquet") # FIXME: aca seguro tengo que cambiar esto cuando tenga la grilla de predicciones
+    prediction = gpd.read_parquet(f"{path_dataout}/gridded_predictions/{modelname}/{modelname}_{best_epoch}_predictions.parquet") # FIXME: aca seguro tengo que cambiar esto cuando tenga la grilla de predicciones
     icpag = build_dataset.load_icpag_dataset(variable="ln_pred_inc_mean")
 
     import earthpy.plot as ep
@@ -113,15 +113,15 @@ def plot_example(bbox, modelname, datasets, extents, img_savename):
 
     ds_plot_example(ds, poly, ax=axs[0]) 
     axs[0].set_title("Imagen satelital")
-    gdf_plot_example(prediction, var="predictions", poly=poly, ax=axs[1])#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
+    gdf_plot_example(prediction, var="prediction", poly=poly, ax=axs[1])#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
     axs[1].set_title("Ingreso predicho por imagenes satelitales")
     gdf_plot_example(icpag, var="var", poly=poly, ax=axs[2])#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
     axs[2].set_title("Ingreso estructural por small area")
     fig.tight_layout()
     savepath = f"{path_outputs}/{modelname}"
     os.makedirs(savepath, exist_ok=True)
-    plt.savefig(f"{path_outputs}/{modelname}/{modelname}_{zona}") # FIXME: revisar la ruta
-    print("Se creó la imagen: ", f"{path_outputs}/{modelname}/{modelname}_{zona}.png", bbox_inches='tight', dpi=300)
+    plt.savefig(f"{path_outputs}/{modelname}/{modelname}_{zona}", bbox_inches='tight', dpi=300)
+    print("Se creó la imagen: ", f"{path_outputs}/{modelname}/{modelname}_{zona}.png")
     
 if __name__ == "__main__":
     
@@ -136,26 +136,28 @@ if __name__ == "__main__":
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
     extra = "_nostack"
 
-    best_epoch = 120
-    
+    best_epoch = 99
     
     model_savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
     
-    ## Cargo datasets
+    # ## Cargo datasets
     datasets, extents = build_dataset.load_satellite_datasets()
-    icpag = build_dataset.load_icpag_dataset()
-    icpag = build_dataset.assign_links_to_datasets(icpag, extents, verbose=False)
+    # icpag = build_dataset.load_icpag_dataset()
+    # icpag = build_dataset.assign_links_to_datasets(icpag, extents, verbose=False)
 
-    ## Carga modelo
-    model_path = f"{path_dataout}/models_by_epoch/{model_savename}/{model_savename}_{best_epoch}"
-    model = keras.models.load_model(model_path)  # load the model from file
+    # ## Carga modelo
+    # model_path = f"{path_dataout}/models_by_epoch/{model_savename}/{model_savename}_{best_epoch}"
+    # model = keras.models.load_model(model_path)  # load the model from file
     
-    ## Armar grilla de predicciones:
-    preds = true_metrics.get_gridded_predictions_for_grid(
-        model, datasets, icpag, image_size, resizing_size, n_bands=n_bands
-    )
-
+    # ## Armar grilla de predicciones:
+    # grid_preds = true_metrics.get_gridded_predictions_for_grid(
+    #     model, datasets, icpag, image_size, resizing_size, n_bands=n_bands
+    # )
+    # grid_preds_folder = rf"{path_dataout}/gridded_predictions/{model_savename}"
+    # os.makedirs(grid_preds_folder, exist_ok=True)
+    # grid_preds.to_parquet(rf"{grid_preds_folder}/{model_savename}_{best_epoch}_predictions.parquet")
+    
     ##############      BBOX a graficar    ##############    
     a_graficar = get_areas_for_evaluation()
     for zona, bbox in a_graficar.items():
-        plot_example(bbox, model_savename, datasets, extents, zona)
+        plot_example(bbox, model_savename, datasets, extents, best_epoch, zona)

@@ -566,7 +566,8 @@ def set_model_and_loss_function(
 
     # Set loss and metrics
     if kind == "reg":
-        loss = keras.losses.MeanSquaredError()
+        # loss = keras.losses.MeanSquaredError()
+        loss = keras.losses.MeanAbsoluteError()
         metrics = [
             keras.metrics.MeanAbsoluteError(),
             keras.metrics.MeanSquaredError(),
@@ -691,7 +692,7 @@ def run(
 
 if __name__ == "__main__":
     image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    sample_size = 1
+    sample_size = 10
     resizing_size = 128
     tiles = 1
 
@@ -699,7 +700,8 @@ if __name__ == "__main__":
     kind = "reg"
     model = "mobnet_v3"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = "_nostack"
+    extra = "_nostack_mae"
+    
     # Step 1: Run Pansharpening and Compression in QGIS to get the images in high resolution
 
     # Step 3: Train the Model
@@ -716,6 +718,6 @@ if __name__ == "__main__":
         tiles=tiles,
         stacked_images=[1],
         n_epochs=1000,
-        extra="_nostack",
+        extra=extra,
     )
     # FIXME: cuando se cae la corrida, la history se pierde...
