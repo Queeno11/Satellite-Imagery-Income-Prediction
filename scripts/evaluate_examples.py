@@ -24,6 +24,7 @@ path_outputs = env["PATH_OUTPUTS"]
 path_imgs = env["PATH_IMGS"]
 # path_programas  = globales[7]
 ###############################################
+import keras
 import numpy as np
 import xarray as xr
 import pandas as pd
@@ -31,7 +32,25 @@ import geopandas as gpd
 import earthpy.plot as ep
 from shapely import Point, Polygon
 import build_dataset
+import true_metrics
 import utils
+
+def get_areas_for_evaluation():
+    a_graficar = {
+        # Test area 2
+        "VILLA_31" : [[-58.3942356256,-34.5947320752],[-58.3679285222,-34.5947320752],[-58.3679285222,-34.5760771024],[-58.3942356256,-34.5760771024],[-58.3942356256,-34.5947320752]],
+        "VILLA_21_24" : [[-58.4108331428,-34.6551111569],[-58.3944394813,-34.6551111569],[-58.3944394813,-34.6437196838],[-58.4108331428,-34.6437196838],[-58.4108331428,-34.6551111569]],
+        "ADROGUE_CHICO" : [[-58.409929469,-34.817989341],[-58.3966363097,-34.817989341],[-58.3966363097,-34.8070532351],[-58.409929469,-34.8070532351],[-58.409929469,-34.817989341]],
+        # Test area 1
+        "PARQUE_LELOIR" : [[-58.67620171,-34.6352316984],[-58.6650723329,-34.6352316984],[-58.6650723329,-34.6252500848],[-58.67620171,-34.6252500848],[-58.67620171,-34.6352316984]],
+        "BELLAVISTA" : [[-58.7013553135,-34.5908167952],[-58.6871646388,-34.5908167952],[-58.6871646388,-34.5802173929],[-58.7013553135,-34.5802173929],[-58.7013553135,-34.5908167952]],
+        "NORDELTA" : [[-58.6856032553,-34.4167915279],[-58.6720706202,-34.4167915279],[-58.6720706202,-34.4065712602],[-58.6856032553,-34.4065712602],[-58.6856032553,-34.4167915279]],
+        "NORDELTA2" : [[-58.6649109046,-34.4174228815],[-58.6445404177,-34.4174228815],[-58.6445404177,-34.4011242703],[-58.6649109046,-34.4011242703],[-58.6649109046,-34.4174228815]],
+    }
+    # Fix issue with Adrogue chico: doesnt fit fully on any dataset
+    a_graficar["ADROGUE_CHICO"] = [[x, y+.004] for x,y in a_graficar["ADROGUE_CHICO"]]
+    
+    return a_graficar
 
 def to_square(polygon):
     from math import sqrt
@@ -77,13 +96,12 @@ def gdf_plot_example(gdf, var, poly, ax, vmin=None, vmax=None):
     ax.set_ylim(y_min, y_max)
     
     
-def plot_example(bbox, modelname, img_savename):
+def plot_example(bbox, modelname, datasets, extents, img_savename):
     
     # BBox a poligono
     poly = to_square(Polygon(bbox))
     
     # Carga datasets a memoria
-    datasets, extents = build_dataset.load_satellite_datasets()
     name = utils.get_dataset_for_polygon(poly, extents)
 
     ds = datasets[name] 
@@ -106,20 +124,38 @@ def plot_example(bbox, modelname, img_savename):
     print("Se creó la imagen: ", f"{path_outputs}/{modelname}/{modelname}_{zona}.png", bbox_inches='tight', dpi=300)
     
 if __name__ == "__main__":
+    
+    image_size = 128*2 # FIXME: VER SI ESTO FUNCIONA!!
+    sample_size = 1
+    resizing_size = 128
+    tiles = 1
+    n_bands = 4
+
+    kind = "reg"
+    model_name= "mobnet_v3"
+    path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
+    extra = "_nostack"
+
+    best_epoch = 120
+    
+    
+    model_savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
+    
+    ## Cargo datasets
+    datasets, extents = build_dataset.load_satellite_datasets()
+    icpag = build_dataset.load_icpag_dataset()
+    icpag = build_dataset.assign_links_to_datasets(icpag, extents, verbose=False)
+
+    ## Carga modelo
+    model_path = f"{path_dataout}/models_by_epoch/{model_savename}/{model_savename}_{best_epoch}"
+    model = keras.models.load_model(model_path)  # load the model from file
+    
+    ## Armar grilla de predicciones:
+    preds = true_metrics.get_gridded_predictions_for_grid(
+        model, datasets, icpag, image_size, resizing_size, n_bands=n_bands
+    )
 
     ##############      BBOX a graficar    ##############    
-    a_graficar = {
-        # Test area 2
-        "VILLA_31" : [[-58.3942356256,-34.5947320752],[-58.3679285222,-34.5947320752],[-58.3679285222,-34.5760771024],[-58.3942356256,-34.5760771024],[-58.3942356256,-34.5947320752]],
-        "VILLA_21_24" : [[-58.4108331428,-34.6551111569],[-58.3944394813,-34.6551111569],[-58.3944394813,-34.6437196838],[-58.4108331428,-34.6437196838],[-58.4108331428,-34.6551111569]],
-        "ADROGUE_CHICO" : [[-58.409929469,-34.817989341],[-58.3966363097,-34.817989341],[-58.3966363097,-34.8070532351],[-58.409929469,-34.8070532351],[-58.409929469,-34.817989341]],
-        # Test area 1
-        "PARQUE_LELOIR" : [[-58.67620171,-34.6352316984],[-58.6650723329,-34.6352316984],[-58.6650723329,-34.6252500848],[-58.67620171,-34.6252500848],[-58.67620171,-34.6352316984]],
-        "BELLAVISTA" : [[-58.7013553135,-34.5908167952],[-58.6871646388,-34.5908167952],[-58.6871646388,-34.5802173929],[-58.7013553135,-34.5802173929],[-58.7013553135,-34.5908167952]],
-        "NORDELTA" : [[-58.6856032553,-34.4167915279],[-58.6720706202,-34.4167915279],[-58.6720706202,-34.4065712602],[-58.6856032553,-34.4065712602],[-58.6856032553,-34.4167915279]],
-        "NORDELTA2" : [[-58.6649109046,-34.4174228815],[-58.6445404177,-34.4174228815],[-58.6445404177,-34.4011242703],[-58.6649109046,-34.4011242703],[-58.6649109046,-34.4174228815]],
-    }
-    a_graficar["ADROGUE_CHICO"] = [[x, y+.004] for x,y in a_graficar["ADROGUE_CHICO"]]
-
+    a_graficar = get_areas_for_evaluation()
     for zona, bbox in a_graficar.items():
-        plot_example(bbox, "mobnet_v3_size128_tiles1_sample1", zona)
+        plot_example(bbox, model_savename, datasets, extents, zona)

@@ -558,7 +558,7 @@ def get_gridded_images_for_dataset(
     return df_preds
 
 
-def get_gridded_images_for_grid(
+def get_gridded_predictions_for_grid(
     model, datasets, icpag, size, resizing_size, n_bands
 ):
     """

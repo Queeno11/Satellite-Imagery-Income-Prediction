@@ -688,6 +688,7 @@ def run(
         generate=True,
     )
     
+
 if __name__ == "__main__":
     image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
     sample_size = 1
