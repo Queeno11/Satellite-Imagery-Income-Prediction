@@ -47,6 +47,7 @@ from tensorflow.keras.callbacks import (
     TensorBoard,
     EarlyStopping,
     ModelCheckpoint,
+    CSVLogger
 )
 from tensorflow.keras.models import Sequential
 import cv2
@@ -375,19 +376,20 @@ def get_callbacks(
         save_best_only=True,  # save the best model
         mode="auto",
         save_freq="epoch",  # save every epoch
-    )  # saving eff_net takes quite a bit of time
+    ) 
+    csv_logger = CSVLogger(f"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv", append=True)
 
     return [
         tensorboard_callback,
         # reduce_lr,
-        early_stopping_callback,
+        # early_stopping_callback,
         model_checkpoint_callback,
+        csv_logger,
         custom_loss_callback,
     ]
 
 
 def run_model(
-    model_name: str,
     model_function: Model,
     lr: float,
     train_dataset: Iterator,
@@ -395,19 +397,16 @@ def run_model(
     sample_size: int,
     batch_size: int,
     loss: str,
+    epochs: int,
     metrics: List[str],
     callbacks: List[Union[TensorBoard, EarlyStopping, ModelCheckpoint]],
-    model_path: str = None,
-    epochs: int = 20,
-    initial_epoch: int = 0,
+    savename: str = "",
 ):
     """This function runs a keras model with the Ranger optimizer and multiple callbacks. The model is evaluated within
     training through the validation generator and afterwards one final time on the test generator.
 
     Parameters
     ----------
-    model_name : str
-        The name of the model as a string.
     model_function : Model
         Keras model function like small_cnn()  or adapt_efficient_net().
     lr : float
@@ -420,13 +419,6 @@ def run_model(
         Loss function.
     metrics: List[str]
         List of metrics to be used.
-    model_path : str, optional
-        Path to the model if restored from previous training, by default None.
-    epochs : int, optional
-        Number of epochs to train, by default 20.
-    initial_epoch : int, optional
-        Initial epoch, by default 0. If restoring training
-
 
     Returns
     -------
@@ -435,7 +427,21 @@ def run_model(
     """
     import tensorflow.python.keras.backend as K
 
-    if model_path is None:
+    def get_last_trained_epoch(savename):
+        try:
+            files = os.listdir(f"{path_dataout}/models_by_epoch/{savename}")
+            epochs = [file.split("_")[-1] for file in files]
+            epochs = [int(epoch) for epoch in epochs if epoch.isdigit()]
+            initial_epoch = max(epochs)
+        except:
+            print("Model not found, running from begining")
+            initial_epoch = None
+                
+        return initial_epoch
+    
+    initial_epoch = get_last_trained_epoch(savename)
+    
+    if initial_epoch is None:
         # constructs the model and compiles it
         model = model_function
         model.summary()
@@ -452,8 +458,10 @@ def run_model(
 
         model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
         initial_epoch = 0
+        
     else:
         print("Restoring model...")
+        model_path = f"{path_dataout}/models_by_epoch/{savename}/{savename}_{initial_epoch}"
         # assert os.path.isfolder(
         #     model_path
         # ), "model_path must be a valid path to a model"
@@ -588,8 +596,6 @@ def run(
     sample_size=1,
     small_sample=False,
     n_epochs=100,
-    initial_epoch=0,
-    model_path=None,
     extra="",
 ):
     """Run all the code of this file.
@@ -655,7 +661,6 @@ def run(
 
     # Run model
     model, history = run_model(
-        model_name=model_name,
         model_function=model,
         lr=0.0001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
         train_dataset=train_dataset,
@@ -666,16 +671,11 @@ def run(
         metrics=metrics,
         callbacks=callbacks,
         epochs=n_epochs,
-        initial_epoch=initial_epoch,
-        model_path=model_path,
+        savename=savename,
     )
-
-    # Export history # FIXME: fijarme si esto anda. Si anda, verificar que compute_true_loss funcione bien!!
-    hist_df = pd.DataFrame(history.history) 
-    hist_df.to_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
-    # hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
-
+            
     # Compute metrics
+    hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
     true_metrics.plot_results(
         models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
         savename=savename,
@@ -690,7 +690,7 @@ def run(
     
 if __name__ == "__main__":
     image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    sample_size = 10
+    sample_size = 1
     resizing_size = 128
     tiles = 1
 
@@ -698,11 +698,10 @@ if __name__ == "__main__":
     kind = "reg"
     model = "mobnet_v3"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-
+    extra = "_nostack"
     # Step 1: Run Pansharpening and Compression in QGIS to get the images in high resolution
 
     # Step 3: Train the Model
-    # initial_epoch = 249
     run(
         model_name=model,
         pred_variable=variable,
@@ -715,8 +714,7 @@ if __name__ == "__main__":
         nbands=4,
         tiles=tiles,
         stacked_images=[1],
-        n_epochs=500,
-        # initial_epoch=initial_epoch,
-        # model_path=f"{path_repo}/data/data_out/models_by_epoch/{model}_size{image_size}_tiles{tiles}_sample5/{model}_size{image_size}_tiles{tiles}_sample{sample_size}_{initial_epoch}",
+        n_epochs=1000,
         extra="_nostack",
     )
+    # FIXME: cuando se cae la corrida, la history se pierde...

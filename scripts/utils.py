@@ -27,6 +27,18 @@ def get_dataset_extent(ds):
 
     return polygon
 
+def get_dataset_for_polygon(poly, extents):
+    ''' Devuelve el nombre del dataset que contiene el polígono seleccionado.'''
+    
+    correct_dataset = None
+    for name, extent in extents.items():
+        if extent.contains(poly):
+            correct_dataset = name
+            break
+    if correct_dataset is None:
+        print("Ningun dataset contiene completamente al polígono seleccionado.")
+        
+    return correct_dataset
 
 def random_point_from_geometry(polygon, size=100):
     '''Generates a random point within the bounds of a Polygon.'''
