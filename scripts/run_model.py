@@ -382,7 +382,7 @@ def get_callbacks(
     return [
         tensorboard_callback,
         # reduce_lr,
-        # early_stopping_callback,
+        early_stopping_callback,
         model_checkpoint_callback,
         csv_logger,
         custom_loss_callback,
@@ -434,6 +434,7 @@ def run_model(
             epochs = [int(epoch) for epoch in epochs if epoch.isdigit()]
             initial_epoch = max(epochs)
         except:
+            os.makedirs(f"{path_dataout}/models_by_epoch/{savename}")
             print("Model not found, running from begining")
             initial_epoch = None
                 
