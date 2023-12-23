@@ -572,6 +572,7 @@ def set_model_and_loss_function(
         metrics = [
             keras.metrics.MeanAbsoluteError(),
             keras.metrics.MeanSquaredError(),
+            keras.metrics.MeanAbsolutePercentageError(),
             # tfa.metrics.RSquare(),
         ]
 
