@@ -143,7 +143,7 @@ if __name__ == "__main__":
     # ## Cargo datasets
     datasets, extents = build_dataset.load_satellite_datasets()
     icpag = build_dataset.load_icpag_dataset()
-    icpag = build_dataset.assign_links_to_datasets(icpag, extents, verbose=False)
+    icpag = build_dataset.assign_datasets_to_gdf(icpag, extents, verbose=False)
 
     ## Carga modelo
     model_path = f"{path_dataout}/models_by_epoch/{model_savename}/{model_savename}_{best_epoch}"
@@ -151,7 +151,7 @@ if __name__ == "__main__":
     
     ## Armar grilla de predicciones:
     grid_preds = true_metrics.get_gridded_predictions_for_grid(
-        model, datasets, icpag, image_size, resizing_size, n_bands=n_bands
+        model, datasets, extents, icpag, image_size, resizing_size, n_bands=n_bands
     )
     grid_preds_folder = rf"{path_dataout}/gridded_predictions/{model_savename}"
     os.makedirs(grid_preds_folder, exist_ok=True)

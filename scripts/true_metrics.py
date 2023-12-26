@@ -95,7 +95,7 @@ def generate_gridded_images(
         # print(f"{link}: {n}/{len_links}")
         # Genera la imagen
         file = rf"{test_folder}/test_{link}.npy"
-        link_dataset = build_dataset.get_dataset_for_link(
+        link_dataset = build_dataset.get_dataset_for_gdf(
             df_test, sat_img_datasets, link
         )
         images, points, bounds = build_dataset.get_gridded_images_for_link(
@@ -125,7 +125,7 @@ def generate_gridded_images(
     return test_folder
 
 def get_gridded_predictions_for_grid(
-    model, datasets, icpag, size, resizing_size, n_bands
+    model, datasets, extents, icpag, size, resizing_size, n_bands
 ):
     """
     Generate gridded predictions for a given GeoDataFrame grid using a machine learning model.
@@ -213,6 +213,7 @@ def get_gridded_predictions_for_grid(
     )
     grid = restrict_grid_to_ICPAG_area(grid, icpag)
     grid = remove_sea_from_grid(grid)
+    grid = build_dataset.assign_datasets_to_gdf(grid, extents, verbose=False)
     print("data ready")
     # Iterate over the center points of each image:
     # - Start point is the center of the image (tile_size / 2, start_index)
@@ -232,11 +233,11 @@ def get_gridded_predictions_for_grid(
         raster_point = (raster_point.x, raster_point.y)
         real_value = radio_censal["var"].values[0]
         link_name = radio_censal["link"].values[0]
-        link_dataset = build_dataset.get_dataset_for_link(icpag, datasets, link_name)
+        cell_dataset = build_dataset.get_dataset_for_gdf(grid, datasets, id_point, id_var="id")
 
         # Check if the centroid of the image is within the original polygon:
         #   - if it is, then generate the n images
-        image_da = utils.image_from_point(link_dataset, raster_point, img_size=size)
+        image_da = utils.image_from_point(cell_dataset, raster_point, img_size=size)
 
         if image_da.shape == (n_bands, size, size):
 
@@ -392,7 +393,7 @@ def _old_compute_custom_loss(
             images = np.load(file)
         else:
             print("Generando...")
-            link_dataset = build_dataset.get_dataset_for_link(
+            link_dataset = build_dataset.get_dataset_for_gdf(
                 df_test, sat_img_datasets, link
             )
             print("listo")
@@ -524,7 +525,7 @@ def _old_compute_predictions_dataset(
     # Cargar bases de datos
     datasets, extents = build_dataset.load_satellite_datasets()
     icpag = build_dataset.load_icpag_dataset()
-    icpag = build_dataset.assign_links_to_datasets(icpag, extents, verbose=False)
+    icpag = build_dataset.assign_datasets_to_gdf(icpag, extents, verbose=False)
 
     # Filtro Radios demasiado grandes (tardan horas en generar la cuadrícula y es puro campo...)
     if trim_size:
@@ -546,7 +547,7 @@ def _old_compute_predictions_dataset(
         if os.path.isfile(file):
             images = np.load(file)
         else:
-            link_dataset = build_dataset.get_dataset_for_link(icpag, datasets, link)
+            link_dataset = build_dataset.get_dataset_for_gdf(icpag, datasets, link)
             images, points, bounds = build_dataset.get_gridded_images_for_link(
                 link_dataset,
                 icpag,

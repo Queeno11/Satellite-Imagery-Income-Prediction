@@ -79,26 +79,29 @@ def load_icpag_dataset(variable="ln_pred_inc_mean"):
     return icpag
 
 
-def assign_links_to_datasets(icpag, extents, verbose=True):
-    """Assign each link a dataset if the census tract falls within the extent of the dataset (images)"""
+def assign_datasets_to_gdf(gdf, extents, centroid=False, verbose=True):
+    """Assign each geometry a dataset if the census tract falls within the extent of the dataset (images)"""
     import warnings
 
     warnings.filterwarnings("ignore")
 
+    if centroid:
+        gdf["geometry"] = gdf.centroid
+        
     for name, bbox in extents.items():
-        icpag.loc[icpag.within(bbox), "dataset"] = name
-
-    nan_links = icpag.dataset.isna().sum()
-    icpag = icpag[icpag.dataset.notna()]
+            gdf.loc[gdf.within(bbox), "dataset"] = name
+ 
+    nan_links = gdf.dataset.isna().sum()
+    gdf = gdf[gdf.dataset.notna()]
 
     if verbose:
-        print("Links without images:", nan_links, "out of", len(icpag))
-        icpag.plot()
+        print("Links without images:", nan_links, "out of", len(gdf))
+        gdf.plot()
         plt.savefig(rf"{path_dataout}/links_with_images.png")
 
     warnings.filterwarnings("default")
 
-    return icpag
+    return gdf
 
 
 def split_train_test(df):
@@ -219,7 +222,7 @@ def assert_train_test_datapoint(bounds, wanted_type="train"):
     return istype
 
 
-def get_dataset_for_link(icpag, datasets, link):
+def get_dataset_for_gdf(icpag, datasets, link, id_var="link"):
     """Get dataset where the census tract is located.
 
     Parameters
@@ -232,7 +235,7 @@ def get_dataset_for_link(icpag, datasets, link):
     -------
     - current_ds: xarray.Dataset, dataset where the census tract is located
     """
-    current_ds_name = icpag.loc[icpag.link == link, "dataset"].values[0]
+    current_ds_name = icpag.loc[icpag[id_var] == link, "dataset"].values[0]
     current_ds = datasets[current_ds_name]
     return current_ds
 
@@ -255,7 +258,7 @@ def build_dataset(
     print("Cargando datasets...")
     datasets, extents = load_satellite_datasets()
     icpag = load_icpag_dataset(variable)
-    icpag = assign_links_to_datasets(icpag, extents)
+    icpag = assign_datasets_to_gdf(icpag, extents)
 
     # Create output folders
     train_path = rf"{path_imgs}/train_size{image_size}_tiles{tiles}_sample{sample_size}"
@@ -266,7 +269,7 @@ def build_dataset(
     metadata = {}
     actual_size = image_size // tiles * tiles
     for link in tqdm(icpag.link.unique()):
-        link_dataset = get_dataset_for_link(icpag, datasets, link)
+        link_dataset = get_dataset_for_gdf(icpag, datasets, link)
 
         for n in range(sample_size):
             # FIXME: algo se rompe con n=2... por qué?

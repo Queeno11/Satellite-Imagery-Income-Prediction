@@ -84,7 +84,7 @@ def create_train_test_dataframes(savename, small_sample=False):
     print("Reading dataset...")
     sat_imgs_datasets, extents = build_dataset.load_satellite_datasets()
     df = build_dataset.load_icpag_dataset()
-    df = build_dataset.assign_links_to_datasets(df, extents, verbose=True)
+    df = build_dataset.assign_datasets_to_gdf(df, extents, verbose=True)
     print("Dataset loaded!")
 
     print("Cleaning dataset...")
@@ -236,7 +236,7 @@ def create_datasets(
 
         if type == "train":
             dataset = dataset.shuffle(
-                buffer_size=int(df_subset.shape[0] / 10),
+                buffer_size=int(df_subset.shape[0]),
                 seed=825,
                 reshuffle_each_iteration=True,
             )
@@ -472,9 +472,9 @@ def run_model(
     history = model.fit(
         train_dataset,
         epochs=epochs,
-        steps_per_epoch=int(
-            10000 * sample_size / batch_size
-        ),  # Aprox 8000 radios censales con datos validos
+        # steps_per_epoch=int(
+        #     10000 * sample_size / batch_size
+        # ),  # Aprox 8000 radios censales con datos validos
         initial_epoch=initial_epoch,
         validation_data=test_dataset,
         callbacks=callbacks,
@@ -570,8 +570,8 @@ def set_model_and_loss_function(
         # loss = keras.losses.MeanSquaredError()
         loss = keras.losses.MeanAbsoluteError()
         metrics = [
-            keras.metrics.MeanAbsoluteError(),
-            keras.metrics.MeanSquaredError(),
+            # keras.metrics.MeanAbsoluteError(),
+            keras.metrics.RootMeanSquaredError(),
             keras.metrics.MeanAbsolutePercentageError(),
             # tfa.metrics.RSquare(),
         ]
