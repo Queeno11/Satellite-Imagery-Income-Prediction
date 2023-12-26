@@ -95,7 +95,8 @@ def assign_datasets_to_gdf(gdf, extents, centroid=False, verbose=True):
     gdf = gdf[gdf.dataset.notna()]
 
     if verbose:
-        print("Links without images:", nan_links, "out of", len(gdf))
+        print("Links without images:", nan_links, "out of", len(gdf)+nan_links)
+        print("Remaining links for train/test:", len(gdf))
         gdf.plot()
         plt.savefig(rf"{path_dataout}/links_with_images.png")
 
