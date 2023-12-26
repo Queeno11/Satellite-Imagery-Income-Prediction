@@ -302,9 +302,11 @@ def process_image(img, resizing_size, moveaxis=True):
         img = np.moveaxis(
             img, 0, 2
         )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
-    
-    image_size = img.shape[0]
-    if image_size != resizing_size:
+        image_size = img.shape[0]
+    else:
+        image_size = img.shape[2]
+
+    if image_size != resizing_size: #FIXME: Me las pasa a blanco y negro. Por qué?
         img = cv2.resize(
             img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
         )
