@@ -37,6 +37,8 @@ import xarray as xr
 from typing import Iterator, List, Union, Tuple, Any
 from datetime import datetime
 
+# Mute TF low_level warnings: https://stackoverflow.com/questions/76912213/tf2-13-local-rendezvous-recv-item-cancelled
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 import tensorflow as tf
 from tensorflow import keras
 import tensorflow_datasets as tfds
@@ -134,6 +136,8 @@ def create_datasets(
     savename="",
     save_examples=True,
 ):
+    # Trying to replicate these good practices from here: https://cs230.stanford.edu/blog/datapipeline/#best-practices
+    
     # Based on: https://medium.com/@acordier/tf-data-dataset-generators-with-parallelization-the-easy-way-b5c5f7d2a18
     def get_data(i, df_subset, type="train", load=False):
         # Decoding from the EagerTensor object. Extracts the number/value from the tensor
@@ -146,42 +150,53 @@ def create_datasets(
                 small_sample=False
             )
 
+        # initialize iterators & params
+        iteration = 0
+        is_correct_type = False
+        image = np.zeros(shape=(nbands, 0, 0))
+        total_bands = nbands * len(stacked_images)
+        img_correct_shape = (total_bands, image_size, image_size)
+
         # Get link, dataset and indicator value of the corresponding index
         polygon = df_subset.iloc[i]["geometry"]
         value = df_subset.iloc[i]["var"]
         link_dataset = sat_img_dataset[df_subset.iloc[i]["dataset"]]
 
-        # Generate the image
-        image, boundaries = utils.stacked_image_from_census_tract(
-            dataset=link_dataset,
-            polygon=polygon,
-            img_size=image_size,
-            n_bands=nbands,
-            stacked_images=stacked_images,
-        )
-
-        if image.shape == (nbands, image_size, image_size):
-            # Assert that data corresponds to train or test
-            is_correct_type = build_dataset.assert_train_test_datapoint(
-                boundaries, wanted_type=type
+        while (is_correct_type == False) & (iteration<=5):
+        
+            # Generate the image
+            image, boundaries = utils.stacked_image_from_census_tract(
+                dataset=link_dataset,
+                polygon=polygon,
+                img_size=image_size,
+                n_bands=nbands,
+                stacked_images=stacked_images,
             )
 
-            if is_correct_type == False:  # If the point is not train/test, discard it
-                image = np.zeros(shape=(nbands, 0, 0))
-                value = np.nan
-                return image, value
+            # (1) Image has to have the correct shape
+            if image.shape == img_correct_shape:
+                # (2) Image has to fall in train or test side
+                is_correct_type = build_dataset.assert_train_test_datapoint(
+                    boundaries, wanted_type=type
+                )
 
-            # Reduce quality and process image
-            image = utils.process_image(image, resizing_size=resizing_size)
+            iteration +=1
 
-            # Augment dataset
-            if type == "train":
-                # image = utils.augment_image(image)
-                image = image
-        else:
-            image = np.zeros(shape=(nbands, 0, 0))
-            value = np.nan
+        if iteration>=5:
+            print(f"More than 5 interations for link {df_subset.iloc[i]['link']}, moving to next link...")
+            image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
+            value = 0
+            return image, value
 
+        # Reduce quality and process image
+        image = utils.process_image(image, resizing_size=resizing_size)
+
+        # Augment dataset
+        if type == "train":
+            # image = utils.augment_image(image)
+            image = image
+
+        # np.save(fr"/mnt/d/Maestría/Tesis/Repo/data/data_out/test_arrays/img_{i}_{df_subset.iloc[i].link}.npy", image)
         return image, value
 
     def get_train_data(i):
@@ -191,15 +206,6 @@ def create_datasets(
     def get_test_data(i):
         image, value = get_data(i, df_test, type="test")
         return image, value
-
-    # def _fixup_shape(x, y):
-    #     """Note that you may need to add the following mapping right after batching, since in some cases
-    #     (depending on the layers used in the trained model and your version of TensorFlow) the implicit
-    #     inferring of the shapes of the output Tensors can fail due to the use of .from_generator()
-    #     """
-    #     x.set_shape([None, None, None, 4])  # n, h, w, c
-    #     y.set_shape([None, 1])  # n, nb_classes
-    #     return x, y
 
     print()
     print("Benchmarking MSE against the mean")
@@ -212,7 +218,7 @@ def create_datasets(
         "train": {
             "df": df_train,
             "get_data_fn": get_train_data,
-            "batch_size": batch_size,
+            "batch_size": 32,
         },
         "test": {
             "df": df_test,
@@ -222,48 +228,95 @@ def create_datasets(
     }
 
     ### Generate Datasets
-    tf_datasets = []
-    for type, params in train_test_dic.items():
-        df_subset = params["df"]
-        get_data_fn = params["get_data_fn"]
-        batch_size_subset = params["batch_size"]
+    ## TRAIN ##
+    # Generator for the index
+    train_dataset = tf.data.Dataset.from_generator(
+        lambda: list(range(df_train.shape[0])),  # The index generator,
+        tf.uint8,
+    )  # Creates a dataset with only the indexes (0, 1, 2, 3, etc.)
 
-        # Generator for the index
-        dataset = tf.data.Dataset.from_generator(
-            lambda: list(range(df_subset.shape[0])),  # The index generator,
-            tf.uint8,
-        )  # Creates a dataset with only the indexes (0, 1, 2, 3, etc.)
+    train_dataset = train_dataset.map(
+        lambda i: tf.py_function(  # The actual data generator. Passes the index to the function that will process the data.
+            func=get_train_data, inp=[i], Tout=[tf.uint8, tf.float32]
+        ),
+        num_parallel_calls=tf.data.experimental.AUTOTUNE,
+    )
 
-        if type == "train":
-            dataset = dataset.shuffle(
-                buffer_size=int(df_subset.shape[0]),
-                seed=825,
-                reshuffle_each_iteration=True,
-            )
+    train_dataset = train_dataset.shuffle(
+        buffer_size=int(df_train.shape[0]),
+        seed=825,
+        reshuffle_each_iteration=True,
+    )
 
-        dataset = dataset.map(
-            lambda i: tf.py_function(  # The actual data generator. Passes the index to the function that will process the data.
-                func=get_data_fn, inp=[i], Tout=[tf.uint8, tf.float32]
-            ),
-            num_parallel_calls=tf.data.experimental.AUTOTUNE,
-        )
+    # train_dataset = train_dataset.filter(
+    #     lambda img, value: (value ==-999_999)
+    # )  # Filter out links without image
+    train_dataset = (
+        train_dataset.batch(32).prefetch(tf.data.AUTOTUNE)
+    )
 
-        dataset = dataset.filter(
-            lambda img, value: (value < 0) | (value >= 0)
-        )  # Filter out NaN values
+    ## TEST ##
+    # Generator for the index
+    test_dataset = tf.data.Dataset.from_generator(
+        lambda: list(range(df_test.shape[0])),  # The index generator,
+        tf.uint8,
+    )  # Creates a dataset with only the indexes (0, 1, 2, 3, etc.)
 
-        if type == "train":
-            print(f"repeating ({sample} times) and prefetching...")
-            dataset = (
-                dataset.batch(batch_size_subset).repeat().prefetch(tf.data.AUTOTUNE)
-            )
+    test_dataset = test_dataset.map(
+        lambda i: tf.py_function(  # The actual data generator. Passes the index to the function that will process the data.
+            func=get_test_data, inp=[i], Tout=[tf.uint8, tf.float32]
+        ),
+        num_parallel_calls=tf.data.experimental.AUTOTUNE,
+    )
 
-        elif type == "test":
-            dataset = dataset.batch(batch_size_subset).repeat(10)
+    test_dataset = test_dataset.batch(128).repeat(10)
 
-        tf_datasets += [dataset]
+    # tf_datasets = {}
+    # for type, params in train_test_dic.items():
+    #     df_subset = params["df"]
+    #     get_data_fn = params["get_data_fn"]
+    #     batch_size_subset = params["batch_size"]
 
-    train_dataset, test_dataset = tf_datasets
+    #     # Generator for the index
+    #     dataset = tf.data.Dataset.from_generator(
+    #         lambda: list(range(df_subset.shape[0])),  # The index generator,
+    #         tf.uint8,
+    #     )  # Creates a dataset with only the indexes (0, 1, 2, 3, etc.)
+
+    #     dataset = dataset.map(
+    #         lambda i: tf.py_function(  # The actual data generator. Passes the index to the function that will process the data.
+    #             func=get_data_fn, inp=[i], Tout=[tf.uint8, tf.float32]
+    #         ),
+    #         num_parallel_calls=tf.data.experimental.AUTOTUNE,
+    #     )
+
+    #     if type == "train":
+    #         dataset = dataset.shuffle(
+    #             buffer_size=int(df_subset.shape[0]),
+    #             seed=825,
+    #             reshuffle_each_iteration=True,
+    #         )
+    #     # dataset = dataset.filter(
+    #     #     lambda img, value: (value ==-999_999)
+    #     # )  # Filter out links without image
+
+    #     if type == "train":
+    #         print(f"repeating ({sample} times) and prefetching...")
+    #         dataset = (
+    #             dataset.batch(batch_size_subset).prefetch(tf.data.AUTOTUNE)
+    #         )
+    #         print("Tamaño del train dataset", len(list(dataset)))
+
+    #     elif type == "test":
+    #         dataset = dataset.batch(batch_size_subset).repeat(10)
+
+    #     tf_datasets[type] = dataset
+
+    # train_dataset = tf_datasets["train"] 
+    # test_dataset = tf_datasets["test"]
+
+    print("Tamaño del train dataset", len(list(train_dataset)))
+    print("Tamaño del test dataset", len(list(test_dataset)))
 
     if save_examples == True:
         i = 0
@@ -472,9 +525,7 @@ def run_model(
     history = model.fit(
         train_dataset,
         epochs=epochs,
-        # steps_per_epoch=int(
-        #     10000 * sample_size / batch_size
-        # ),  # Aprox 8000 radios censales con datos validos
+        steps_per_epoch=8545 * sample_size / 32,
         initial_epoch=initial_epoch,
         validation_data=test_dataset,
         callbacks=callbacks,
@@ -625,7 +676,8 @@ def run(
     ### Create train and test dataframes from ICPAG
     df_train, df_test, sat_img_dataset = create_train_test_dataframes(
         savename,
-        small_sample=small_sample
+        small_sample=True
+        # small_sample=small_sample
     )
 
     ## Transform dataframes into datagenerators:
@@ -645,7 +697,6 @@ def run(
         savename=savename,
         save_examples=True,
     )
-
     # Get tensorboard callbacks and set the custom test loss computation
     #   at the end of each epoch
     callbacks = get_callbacks(
@@ -694,7 +745,7 @@ def run(
 
 if __name__ == "__main__":
     image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    sample_size = 10
+    sample_size = 1
     resizing_size = 128
     tiles = 1
 
@@ -702,7 +753,7 @@ if __name__ == "__main__":
     kind = "reg"
     model = "mobnet_v3"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = "_nostack_mae"
+    extra = "_nostack_newpipe"
     
     # Step 1: Run Pansharpening and Compression in QGIS to get the images in high resolution
 
