@@ -143,7 +143,6 @@ if __name__ == "__main__":
     # ## Cargo datasets
     datasets, extents = build_dataset.load_satellite_datasets()
     icpag = build_dataset.load_icpag_dataset()
-    icpag = build_dataset.assign_datasets_to_gdf(icpag, extents, verbose=False)
 
     ## Carga modelo
     model_path = f"{path_dataout}/models_by_epoch/{model_savename}/{model_savename}_{best_epoch}"
