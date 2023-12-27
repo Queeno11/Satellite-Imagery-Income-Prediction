@@ -315,8 +315,8 @@ def create_datasets(
     # train_dataset = tf_datasets["train"] 
     # test_dataset = tf_datasets["test"]
 
-    print("Tamaño del train dataset", len(list(train_dataset)))
-    print("Tamaño del test dataset", len(list(test_dataset)))
+    # print("Tamaño del train dataset", len(list(train_dataset)))
+    # print("Tamaño del test dataset", len(list(test_dataset)))
 
     if save_examples == True:
         i = 0
@@ -525,7 +525,7 @@ def run_model(
     history = model.fit(
         train_dataset,
         epochs=epochs,
-        steps_per_epoch=8545 * sample_size / 32,
+        # steps_per_epoch=8545 * sample_size / 32,
         initial_epoch=initial_epoch,
         validation_data=test_dataset,
         callbacks=callbacks,
@@ -618,8 +618,8 @@ def set_model_and_loss_function(
 
     # Set loss and metrics
     if kind == "reg":
-        # loss = keras.losses.MeanSquaredError()
-        loss = keras.losses.MeanAbsoluteError()
+        loss = keras.losses.MeanSquaredError()
+        # loss = keras.losses.MeanAbsoluteError()
         metrics = [
             # keras.metrics.MeanAbsoluteError(),
             keras.metrics.RootMeanSquaredError(),
@@ -664,69 +664,68 @@ def run(
     batch_size = 64
 
 
-    ### Set Model & loss function
-    model, loss, metrics = set_model_and_loss_function(
-        model_name=model_name,
-        kind=kind,
-        bands=nbands * len(stacked_images),
-        resizing_size=resizing_size,
-        weights=weights,
-    )
+    # ### Set Model & loss function
+    # model, loss, metrics = set_model_and_loss_function(
+    #     model_name=model_name,
+    #     kind=kind,
+    #     bands=nbands * len(stacked_images),
+    #     resizing_size=resizing_size,
+    #     weights=weights,
+    # )
 
-    ### Create train and test dataframes from ICPAG
-    df_train, df_test, sat_img_dataset = create_train_test_dataframes(
-        savename,
-        small_sample=True
-        # small_sample=small_sample
-    )
+    # ### Create train and test dataframes from ICPAG
+    # df_train, df_test, sat_img_dataset = create_train_test_dataframes(
+    #     savename,
+    #     small_sample=small_sample
+    # )
 
-    ## Transform dataframes into datagenerators:
-    #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
-    print("Setting up data generators...")
-    train_dataset, test_dataset = create_datasets(
-        df_train=df_train,
-        df_test=df_test,
-        sat_img_dataset=sat_img_dataset,
-        image_size=image_size,
-        resizing_size=resizing_size,
-        nbands=nbands,
-        stacked_images=stacked_images,
-        tiles=tiles,
-        sample=sample_size,
-        batch_size=batch_size,
-        savename=savename,
-        save_examples=True,
-    )
-    # Get tensorboard callbacks and set the custom test loss computation
-    #   at the end of each epoch
-    callbacks = get_callbacks(
-        model_name,
-        loss,
-        savename=savename,
-        df_test=df_test,
-        sat_img_datasets=sat_img_dataset,
-        tiles=tiles,
-        size=image_size,
-        resizing_size=resizing_size,
-        train_sample=sample_size,
-        test_sample=1,
-        logdir=log_dir,
-    )
+    # ## Transform dataframes into datagenerators:
+    # #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
+    # print("Setting up data generators...")
+    # train_dataset, test_dataset = create_datasets(
+    #     df_train=df_train,
+    #     df_test=df_test,
+    #     sat_img_dataset=sat_img_dataset,
+    #     image_size=image_size,
+    #     resizing_size=resizing_size,
+    #     nbands=nbands,
+    #     stacked_images=stacked_images,
+    #     tiles=tiles,
+    #     sample=sample_size,
+    #     batch_size=batch_size,
+    #     savename=savename,
+    #     save_examples=True,
+    # )
+    # # Get tensorboard callbacks and set the custom test loss computation
+    # #   at the end of each epoch
+    # callbacks = get_callbacks(
+    #     model_name,
+    #     loss,
+    #     savename=savename,
+    #     df_test=df_test,
+    #     sat_img_datasets=sat_img_dataset,
+    #     tiles=tiles,
+    #     size=image_size,
+    #     resizing_size=resizing_size,
+    #     train_sample=sample_size,
+    #     test_sample=1,
+    #     logdir=log_dir,
+    # )
 
-    # Run model
-    model, history = run_model(
-        model_function=model,
-        lr=0.0001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
-        train_dataset=train_dataset,
-        test_dataset=test_dataset,
-        sample_size=sample_size,
-        batch_size=batch_size,
-        loss=loss,
-        metrics=metrics,
-        callbacks=callbacks,
-        epochs=n_epochs,
-        savename=savename,
-    )
+    # # Run model
+    # model, history = run_model(
+    #     model_function=model,
+    #     lr=0.0001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
+    #     train_dataset=train_dataset,
+    #     test_dataset=test_dataset,
+    #     sample_size=sample_size,
+    #     batch_size=batch_size,
+    #     loss=loss,
+    #     metrics=metrics,
+    #     callbacks=callbacks,
+    #     epochs=n_epochs,
+    #     savename=savename,
+    # )
             
     # Compute metrics
     hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")

@@ -734,12 +734,12 @@ def compute_custom_loss_all_epochs(
     # Export csv with all MSE
     mse_test  = pd.DataFrame().from_dict(mse_epochs, orient="index", columns=["mse_test_rc"])
     mse_train = pd.read_csv(f"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")\
-                    [["mean_squared_error", "val_mean_squared_error"]]
+                    [["loss", "val_loss"]]
     metrics_epochs = mse_train.join(mse_test, how="outer").reset_index().rename(
                         columns={
                             "index":"epoch",
-                            "mean_squared_error":"mse_train",
-                            "val_mean_squared_error":"mse_test_img"
+                            "loss":"mse_train",
+                            "val_loss":"mse_test_img"
                         })
     metrics_epochs.to_csv(f"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv")
     print("Se creo el archivo:", f"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv")
