@@ -57,13 +57,15 @@ def load_satellite_datasets(stretch=False):
     return datasets, extents
 
 
-def load_icpag_dataset(variable="ln_pred_inc_mean"):
+def load_icpag_dataset(variable="ln_pred_inc_mean", trim=True):
     """Open ICPAG dataset and merge with ELL estimation."""
 
     # Open ICPAG dataset
     icpag = gpd.read_file(rf"{path_datain}/ICPAG/base_icpag_500k.shp")
     icpag = icpag.to_crs(epsg=4326)
     icpag = icpag[icpag.AMBA_legal == 1].reset_index(drop=True)
+    if trim:
+        icpag = icpag[icpag["AREA"] <= 200000]  # Remove rc that are too big
 
     # Open ELL estimation
     collapse_link = pd.read_stata(rf"{path_datain}/predict_ingreso_collapse.dta")

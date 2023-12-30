@@ -28,6 +28,7 @@ path_imgs = env["PATH_IMGS"]
 import true_metrics
 import custom_models
 import build_dataset
+import grid_predictions
 import utils
 
 import sys
@@ -235,6 +236,12 @@ def create_datasets(
         tf.uint8,
     )  # Creates a dataset with only the indexes (0, 1, 2, 3, etc.)
 
+    train_dataset = train_dataset.shuffle(
+        buffer_size=int(df_train.shape[0]),
+        seed=825,
+        reshuffle_each_iteration=True,
+    )
+
     train_dataset = train_dataset.map(
         lambda i: tf.py_function(  # The actual data generator. Passes the index to the function that will process the data.
             func=get_train_data, inp=[i], Tout=[tf.uint8, tf.float32]
@@ -242,18 +249,16 @@ def create_datasets(
         num_parallel_calls=tf.data.experimental.AUTOTUNE,
     )
 
-    train_dataset = train_dataset.shuffle(
-        buffer_size=int(df_train.shape[0]),
-        seed=825,
-        reshuffle_each_iteration=True,
-    )
 
+    # FIXME: debería agregar esto...
     # train_dataset = train_dataset.filter(
     #     lambda img, value: (value ==-999_999)
     # )  # Filter out links without image
-    train_dataset = (
-        train_dataset.batch(32).prefetch(tf.data.AUTOTUNE)
-    )
+    train_dataset = train_dataset.batch(32)
+    if sample_size>1:
+        train_dataset = train_dataset.repeat(sample_size).prefetch(tf.data.AUTOTUNE)
+    else:
+        train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
 
     ## TEST ##
     # Generator for the index
@@ -414,7 +419,7 @@ def get_callbacks(
     early_stopping_callback = EarlyStopping(
         monitor="val_loss",
         min_delta=0,  # the training is terminated as soon as the performance measure gets worse from one epoch to the next
-        patience=50,  # amount of epochs with no improvements until the model stops
+        patience=200,  # amount of epochs with no improvements until the model stops
         verbose=2,
         mode="auto",  # the model is stopped when the quantity monitored has stopped decreasing
         restore_best_weights=True,  # restore the best model with the lowest validation error
@@ -516,9 +521,6 @@ def run_model(
     else:
         print("Restoring model...")
         model_path = f"{path_dataout}/models_by_epoch/{savename}/{savename}_{initial_epoch}"
-        # assert os.path.isfolder(
-        #     model_path
-        # ), "model_path must be a valid path to a model"
         model = keras.models.load_model(model_path)  # load the model from file
         initial_epoch = initial_epoch
 
@@ -595,7 +597,7 @@ def set_model_and_loss_function(
     # Diccionario de modelos
     get_model_from_name = {
         "small_cnn": custom_models.small_cnn(resizing_size),  # kind=kind),
-        "mobnet_v3": custom_models.mobnet_v3(
+        "mobnet_v3_large": custom_models.mobnet_v3_large(
             resizing_size, bands=bands, kind=kind, weights=weights
         ),
         # "resnet152_v2": custom_models.resnet152_v2(kind=kind, weights=weights),
@@ -664,68 +666,68 @@ def run(
     batch_size = 64
 
 
-    # ### Set Model & loss function
-    # model, loss, metrics = set_model_and_loss_function(
-    #     model_name=model_name,
-    #     kind=kind,
-    #     bands=nbands * len(stacked_images),
-    #     resizing_size=resizing_size,
-    #     weights=weights,
-    # )
+    ### Set Model & loss function
+    model, loss, metrics = set_model_and_loss_function(
+        model_name=model_name,
+        kind=kind,
+        bands=nbands * len(stacked_images),
+        resizing_size=resizing_size,
+        weights=weights,
+    )
 
-    # ### Create train and test dataframes from ICPAG
-    # df_train, df_test, sat_img_dataset = create_train_test_dataframes(
-    #     savename,
-    #     small_sample=small_sample
-    # )
+    ### Create train and test dataframes from ICPAG
+    df_train, df_test, sat_img_dataset = create_train_test_dataframes(
+        savename,
+        small_sample=small_sample
+    )
 
-    # ## Transform dataframes into datagenerators:
-    # #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
-    # print("Setting up data generators...")
-    # train_dataset, test_dataset = create_datasets(
-    #     df_train=df_train,
-    #     df_test=df_test,
-    #     sat_img_dataset=sat_img_dataset,
-    #     image_size=image_size,
-    #     resizing_size=resizing_size,
-    #     nbands=nbands,
-    #     stacked_images=stacked_images,
-    #     tiles=tiles,
-    #     sample=sample_size,
-    #     batch_size=batch_size,
-    #     savename=savename,
-    #     save_examples=True,
-    # )
-    # # Get tensorboard callbacks and set the custom test loss computation
-    # #   at the end of each epoch
-    # callbacks = get_callbacks(
-    #     model_name,
-    #     loss,
-    #     savename=savename,
-    #     df_test=df_test,
-    #     sat_img_datasets=sat_img_dataset,
-    #     tiles=tiles,
-    #     size=image_size,
-    #     resizing_size=resizing_size,
-    #     train_sample=sample_size,
-    #     test_sample=1,
-    #     logdir=log_dir,
-    # )
+    ## Transform dataframes into datagenerators:
+    #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
+    print("Setting up data generators...")
+    train_dataset, test_dataset = create_datasets(
+        df_train=df_train,
+        df_test=df_test,
+        sat_img_dataset=sat_img_dataset,
+        image_size=image_size,
+        resizing_size=resizing_size,
+        nbands=nbands,
+        stacked_images=stacked_images,
+        tiles=tiles,
+        sample=sample_size,
+        batch_size=batch_size,
+        savename=savename,
+        save_examples=True,
+    )
+    # Get tensorboard callbacks and set the custom test loss computation
+    #   at the end of each epoch
+    callbacks = get_callbacks(
+        model_name,
+        loss,
+        savename=savename,
+        df_test=df_test,
+        sat_img_datasets=sat_img_dataset,
+        tiles=tiles,
+        size=image_size,
+        resizing_size=resizing_size,
+        train_sample=sample_size,
+        test_sample=1,
+        logdir=log_dir,
+    )
 
-    # # Run model
-    # model, history = run_model(
-    #     model_function=model,
-    #     lr=0.0001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
-    #     train_dataset=train_dataset,
-    #     test_dataset=test_dataset,
-    #     sample_size=sample_size,
-    #     batch_size=batch_size,
-    #     loss=loss,
-    #     metrics=metrics,
-    #     callbacks=callbacks,
-    #     epochs=n_epochs,
-    #     savename=savename,
-    # )
+    # Run model
+    model, history = run_model(
+        model_function=model,
+        lr=0.0001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
+        train_dataset=train_dataset,
+        test_dataset=test_dataset,
+        sample_size=sample_size,
+        batch_size=batch_size,
+        loss=loss,
+        metrics=metrics,
+        callbacks=callbacks,
+        epochs=n_epochs,
+        savename=savename,
+    )
             
     # Compute metrics
     hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
@@ -740,23 +742,27 @@ def run(
         stacked_images=stacked_images,
         generate=True,
     )
+
+    grid_preds, datasets, extents = grid_predictions.generate_grid(savename, image_size, resizing_size, nbands)
     
+    ##############      BBOX a graficar    ##############  
+    a_graficar = grid_predictions.get_areas_for_evaluation()
+    for zona, bbox in a_graficar.items():
+        grid_predictions.plot_example(grid_preds, bbox, savename, datasets, extents, zona)
 
 if __name__ == "__main__":
-    image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    sample_size = 1
+    image_size = 128 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
+    sample_size = 5
     resizing_size = 128
     tiles = 1
 
     variable = "ln_pred_inc_mean"
     kind = "reg"
-    model = "mobnet_v3"
+    model = "mobnet_v3_large"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = "_nostack_newpipe"
+    extra = "_nostack_trim"
     
-    # Step 1: Run Pansharpening and Compression in QGIS to get the images in high resolution
-
-    # Step 3: Train the Model
+    # Train the Model
     run(
         model_name=model,
         pred_variable=variable,
@@ -772,4 +778,3 @@ if __name__ == "__main__":
         n_epochs=1000,
         extra=extra,
     )
-    # FIXME: cuando se cae la corrida, la history se pierde...

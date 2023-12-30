@@ -653,7 +653,7 @@ def compute_custom_loss_all_epochs(
     # Load data
     print("Loading data...")
     sat_img_datasets, extents = build_dataset.load_satellite_datasets()
-    df_test = gpd.read_feather(rf"{path_dataout}/test_datasets/test_dataframe.feather")
+    df_test = gpd.read_feather(rf"{path_dataout}/test_datasets/{savename}_test_dataframe.feather")
     print("Data loaded!")
 
     # dir of the images
