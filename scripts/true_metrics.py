@@ -124,8 +124,9 @@ def generate_gridded_images(
     
     return test_folder
 
+
 def get_gridded_predictions_for_grid(
-    model, datasets, extents, icpag, size, resizing_size, n_bands
+    model, datasets, extents, icpag, size, resizing_size, n_bands, stacked_images
 ):
     """
     Generate gridded predictions for a given GeoDataFrame grid using a machine learning model.
@@ -195,17 +196,57 @@ def get_gridded_predictions_for_grid(
         
         return grid # Polygon with amba bounds
     
-    # Inicializo arrays
-    batch_images = np.empty((0, resizing_size, resizing_size, 4))
-    batch_link_names = np.empty((0))
-    batch_predictions = np.empty((0))
-    batch_real_values = np.empty((0))
-    batch_id_points = np.empty((0))
-    
-    all_link_names = np.empty((0))
-    all_predictions = np.empty((0))
-    all_real_values = np.empty((0))
-    all_id_points = np.empty((0))
+    def get_grid_data(i):
+        # Decoding from the EagerTensor object. Extracts the number/value from the tensor
+        #   example: <tf.Tensor: shape=(), dtype=uint32, numpy=20> -> 20
+        i = i.numpy()
+
+        # initialize iterators & params
+        iteration = 0
+        image = np.zeros(shape=(n_bands, 0, 0))
+        total_bands = n_bands * len(stacked_images)
+        img_correct_shape = (total_bands, size, size)
+
+        # Get link, dataset and indicator value of the corresponding index
+        id_point, raster_point = grid.loc[i, ["id","point"]]
+
+        # Get data for selected point
+        radio_censal = icpag.loc[icpag.contains(raster_point)]
+        if radio_censal.empty:
+            # El radio censal no existe, es el medio del mar...
+            print("Radio censal vacio:", id_point ,raster_point)
+            image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
+            return image
+        
+        raster_point = (raster_point.x, raster_point.y)
+        link_name = radio_censal["link"].values[0]
+
+        cell_dataset = build_dataset.get_dataset_for_gdf(grid, datasets, id_point, id_var="id")
+
+        while (image.shape != img_correct_shape) & (iteration<=5):
+        
+            # Generate the image
+            image, boundaries = utils.stacked_image_from_census_tract(
+                dataset=cell_dataset,
+                polygon=None,
+                img_size=size,
+                n_bands=n_bands,
+                stacked_images=stacked_images,
+                point=raster_point
+            )
+
+            iteration +=1
+
+        if iteration>=5:
+            print(f"More than 5 interations for link {link_name}, moving to next link...")
+            image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
+            return image
+
+        # Reduce quality and process image
+        image = utils.process_image(image, resizing_size=resizing_size)
+        # np.save(fr"/mnt/d/Maestría/Tesis/Repo/data/data_out/grid_datasets/img_{i}_{id_point}.npy", image)
+        # print(f"Se creó /mnt/d/Maestría/Tesis/Repo/data/data_out/grid_datasets/img_{i}_{id_point}.npy")
+        return image
 
     # Open grid of polygons for the corresponding parameters:
     grid = gpd.read_parquet(
@@ -214,94 +255,39 @@ def get_gridded_predictions_for_grid(
     grid = restrict_grid_to_ICPAG_area(grid, icpag)
     grid = remove_sea_from_grid(grid)
     grid = build_dataset.assign_datasets_to_gdf(grid, extents, verbose=False)
-    print("data ready")
-    # Iterate over the center points of each image:
-    # - Start point is the center of the image (tile_size / 2, start_index)
-    # - End point is the maximum possible center point (link_dataset.y.size)
-    # - Step is the size of each image (tile_size)
-
+    grid = grid.set_crs(epsg=4326, allow_override=True)
     grid["point"] = grid.centroid
-    for index, row in tqdm(grid[["id","point"]].iterrows()):
-        id_point, raster_point = row
+    grid["bounds_geom"] = grid["geometry"]
+    grid = grid.set_geometry("point")
+    grid = grid.sjoin(icpag[["link", "var", "geometry"]], predicate="intersects")
+    grid = grid.reset_index(drop=True)
+    print("data loaded")
+    
+    ### TF Datasets
+    print("SE VAN A GENERAR:", grid.shape[0], "IMAGENES")
+    grid_dataset = tf.data.Dataset.from_generator(
+        lambda: list(range(grid.shape[0])),  # The index generator,
+        tf.uint32,
+    )  # Creates a dataset with only the indexes (0, 1, 2, 3, etc.)
 
-        # Get data for selected point
-        radio_censal = icpag.loc[icpag.contains(raster_point)]
-        if radio_censal.empty:
-            # El radio censal no existe, es el medio del mar...
-            continue
-        
-        raster_point = (raster_point.x, raster_point.y)
-        real_value = radio_censal["var"].values[0]
-        link_name = radio_censal["link"].values[0]
-        cell_dataset = build_dataset.get_dataset_for_gdf(grid, datasets, id_point, id_var="id")
+    grid_dataset = grid_dataset.map(
+        lambda i: tf.py_function(  # The actual data generator. Passes the index to the function that will process the data.
+            func=get_grid_data, inp=[i], Tout=[tf.uint8]
+        ),
+        num_parallel_calls=1,
+        deterministic=True,
+    )
+    grid_dataset = grid_dataset.batch(128)
 
-        # Check if the centroid of the image is within the original polygon:
-        #   - if it is, then generate the n images
-        image_da = utils.image_from_point(cell_dataset, raster_point, img_size=size)
+    ### Predictions
+    predictions = model.predict(grid_dataset)
+    
+    # Formateo dataframe para exportar:
+    grid = grid.rename(columns={"var":"real_value", "geometry":"link_polygon"})
+    grid["prediction"] = predictions
+    grid["prediction_error"] = grid["real_value"] - grid["prediction"]
 
-        if image_da.shape == (n_bands, size, size):
-
-            # Process iamge
-            image = image_da.to_numpy()[:n_bands,::size,::size]
-            image = image.astype(np.uint8)
-            image = utils.process_image(image, resizing_size)
-            # add to batches
-            batch_images = np.concatenate([batch_images, np.array([image])], axis=0)
-            batch_link_names = np.concatenate(
-                [batch_link_names, np.array([link_name])], axis=0
-            )
-            batch_real_values = np.concatenate(
-                [batch_real_values, np.array([real_value])], axis=0
-            )
-            batch_id_points = np.concatenate(
-                [batch_id_points, np.array([id_point])], axis=0
-            )
-
-        else:
-            print("error en imagen:", id_point)
-            
-
-        # predict with the model over the batch
-        if batch_images.shape[0] == 1024: # 128 is the batch size
-            # predictions
-            batch_predictions = get_batch_predictions(model, batch_images)
-
-            # Store data
-            all_predictions = np.concatenate(
-                [all_predictions, batch_predictions], axis=0
-            )
-            all_link_names = np.concatenate(
-                [all_link_names, batch_link_names], axis=0
-            )
-            all_real_values = np.concatenate(
-                [all_real_values, batch_real_values], axis=0
-            )
-            all_id_points = np.concatenate(
-                [all_id_points, batch_id_points], axis=0
-            )
-
-            # Restore batches to empty
-            batch_images = np.empty((0, resizing_size, resizing_size, 4))
-            batch_predictions = np.empty((0))
-            batch_link_names = np.empty((0))
-            batch_predictions = np.empty((0))
-            batch_real_values = np.empty((0))
-            batch_id_points = np.empty((0))
-
-    # Creo dataframe para exportar:
-    d = {
-        "link": all_link_names,
-        "prediction": all_predictions,
-        "link_actual_value": all_real_values,
-        "prediction_error": (all_real_values - all_predictions), 
-        "id": all_id_points,
-    }
-
-    df_preds = pd.DataFrame(d)
-    gridded_predictions = grid[["id","geometry"]].merge(df_preds, on="id")
-    gridded_predictions = gridded_predictions.set_crs(epsg=4326, allow_override=True)
-
-    return gridded_predictions
+    return grid
 
 def get_batch_predictions(model, batch_images):
     """Computa las predicciones del batch
@@ -682,6 +668,7 @@ def compute_custom_loss_all_epochs(
     link_names = []
     real_values = []
     images = []
+
     for link in tqdm(links):
         # Obtener las imágenes del radio censal
         link_real_value = df_test.loc[df_test["link"] == link, "var"].values[0]
@@ -847,7 +834,7 @@ def rerun_train_val_metrics(
     image_size=512,
     resizing_size=200,
     tiles=1,
-    nbands=4,
+    n_bands=4,
     stacked_images=[1],
     sample_size=1,
     small_sample=False,
@@ -877,7 +864,7 @@ def rerun_train_val_metrics(
         sat_img_dataset=sat_img_dataset,
         image_size=image_size,
         resizing_size=resizing_size,
-        nbands=nbands,
+        n_bands=n_bands,
         stacked_images=stacked_images,
         tiles=tiles,
         sample=sample_size,
@@ -922,7 +909,7 @@ def rerun_train_val_metrics(
         size=image_size,
         resizing_size=resizing_size,
         n_epochs=hist_df.index.max(),
-        n_bands=nbands,
+        n_bands=n_bands,
         stacked_images=stacked_images,
         generate=True,
     )
@@ -967,7 +954,7 @@ if __name__ == "__main__":
         image_size=image_size,
         sample_size=sample_size,
         resizing_size=resizing_size,
-        nbands=4,
+        n_bands=4,
         tiles=tiles,
         stacked_images=[1],
         n_epochs=99,

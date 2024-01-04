@@ -146,7 +146,8 @@ def stacked_image_from_census_tract(dataset, polygon, point=None, img_size=100, 
     if point is None:
         # Sample point from the polygon's box
         point = random_point_from_geometry(polygon)
-    
+        # point = polygon.centroid.x, polygon.centroid.y 
+        
     for size_multiplier in stacked_images:
         image_size = img_size*size_multiplier
         image_da = image_from_point(dataset, point, image_size)

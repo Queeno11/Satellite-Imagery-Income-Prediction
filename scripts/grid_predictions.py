@@ -96,7 +96,7 @@ def gdf_plot_example(gdf, var, poly, ax, vmin=None, vmax=None):
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
     
-def generate_grid(savename, image_size, resizing_size, nbands):
+def generate_grid(savename, image_size, resizing_size, nbands, stacked_images):
     # Cargo datasets
     hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv")
     best_epoch = hist_df[hist_df.mse_test_rc.min()==hist_df.mse_test_rc].index.item()
@@ -109,7 +109,7 @@ def generate_grid(savename, image_size, resizing_size, nbands):
 
     # Genero la grilla
     grid_preds = true_metrics.get_gridded_predictions_for_grid(
-        model, datasets, extents, icpag, image_size, resizing_size, n_bands=nbands
+        model, datasets, extents, icpag, image_size, resizing_size, n_bands=nbands, stacked_images=stacked_images,
     )
     
     # Guardo la grilla
@@ -152,7 +152,8 @@ if __name__ == "__main__":
     resizing_size = 128
     tiles = 1
     n_bands = 4
-
+    stacked_images = [1]
+    
     kind = "reg"
     model_name= "mobnet_v3"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
@@ -172,7 +173,7 @@ if __name__ == "__main__":
     
     ## Armar grilla de predicciones:
     grid_preds = true_metrics.get_gridded_predictions_for_grid(
-        model, datasets, extents, icpag, image_size, resizing_size, n_bands=n_bands
+        model, datasets, extents, icpag, image_size, resizing_size, n_bands=n_bands, stacked_images=stacked_images,
     )
     grid_preds_folder = rf"{path_dataout}/gridded_predictions/{model_savename}"
     os.makedirs(grid_preds_folder, exist_ok=True)
