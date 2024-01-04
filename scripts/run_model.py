@@ -215,25 +215,12 @@ def create_datasets(
 
     print(f"Sample size: {sample}")
 
-    train_test_dic = {
-        "train": {
-            "df": df_train,
-            "get_data_fn": get_train_data,
-            "batch_size": 32,
-        },
-        "test": {
-            "df": df_test,
-            "get_data_fn": get_test_data,
-            "batch_size": 128,
-        },
-    }
-
     ### Generate Datasets
     ## TRAIN ##
     # Generator for the index
     train_dataset = tf.data.Dataset.from_generator(
         lambda: list(range(df_train.shape[0])),  # The index generator,
-        tf.uint8,
+        tf.uint32,
     )  # Creates a dataset with only the indexes (0, 1, 2, 3, etc.)
 
     train_dataset = train_dataset.shuffle(
@@ -246,7 +233,6 @@ def create_datasets(
         lambda i: tf.py_function(  # The actual data generator. Passes the index to the function that will process the data.
             func=get_train_data, inp=[i], Tout=[tf.uint8, tf.float32]
         ),
-        num_parallel_calls=tf.data.experimental.AUTOTUNE,
     )
 
 
@@ -275,7 +261,7 @@ def create_datasets(
     )
 
     test_dataset = test_dataset.batch(128).repeat(10)
-
+    
     # tf_datasets = {}
     # for type, params in train_test_dic.items():
     #     df_subset = params["df"]
@@ -515,7 +501,7 @@ def run_model(
         #     learning_rate=lr, momentum=0.9, nesterov=True
         # )  #  1=No friction
 
-        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+        model.compile(optimizer="nadam", loss=loss, metrics=metrics)
         initial_epoch = 0
         
     else:
@@ -681,7 +667,7 @@ def run(
         small_sample=small_sample
     )
 
-    ## Transform dataframes into datagenerators:
+    ### Transform dataframes into datagenerators:
     #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
     print("Setting up data generators...")
     train_dataset, test_dataset = create_datasets(
@@ -743,7 +729,7 @@ def run(
         generate=True,
     )
 
-    grid_preds, datasets, extents = grid_predictions.generate_grid(savename, image_size, resizing_size, nbands)
+    grid_preds, datasets, extents = grid_predictions.generate_grid(savename, image_size, resizing_size, nbands, stacked_images)
     
     ##############      BBOX a graficar    ##############  
     a_graficar = grid_predictions.get_areas_for_evaluation()
@@ -752,7 +738,7 @@ def run(
 
 if __name__ == "__main__":
     image_size = 128 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    sample_size = 5
+    sample_size = 1
     resizing_size = 128
     tiles = 1
 
@@ -760,7 +746,7 @@ if __name__ == "__main__":
     kind = "reg"
     model = "mobnet_v3_large"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = "_nostack_trim"
+    extra = "_no_autotune"
     
     # Train the Model
     run(
@@ -775,6 +761,6 @@ if __name__ == "__main__":
         nbands=4,
         tiles=tiles,
         stacked_images=[1],
-        n_epochs=1000,
+        n_epochs=50,
         extra=extra,
     )
