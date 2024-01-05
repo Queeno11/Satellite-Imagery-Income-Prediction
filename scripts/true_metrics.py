@@ -33,6 +33,7 @@ import sys
 import pandas as pd
 import os
 import xarray as xr
+import geopandas as gpd
 from typing import Iterator, List, Union, Tuple, Any
 from datetime import datetime
 
@@ -94,7 +95,7 @@ def generate_gridded_images(
         # print(f"{link}: {n}/{len_links}")
         # Genera la imagen
         file = rf"{test_folder}/test_{link}.npy"
-        link_dataset = build_dataset.get_dataset_for_link(
+        link_dataset = build_dataset.get_dataset_for_gdf(
             df_test, sat_img_datasets, link
         )
         images, points, bounds = build_dataset.get_gridded_images_for_link(
@@ -122,6 +123,171 @@ def generate_gridded_images(
     print("Imagenes generadas!")
     
     return test_folder
+
+
+def get_gridded_predictions_for_grid(
+    model, datasets, extents, icpag, size, resizing_size, n_bands, stacked_images
+):
+    """
+    Generate gridded predictions for a given GeoDataFrame grid using a machine learning model.
+
+    Parameters:
+    - model (keras.Model): Trained machine learning model for image prediction.
+    - datasets (dict): Dictionary containing xarray.Datasets for image generation (the original satellite images).
+    - icpag (geopandas.GeoDataFrame): GeoDataFrame with census tract data.
+    - size (int): Size of each image.
+    - resizing_size (int): Size to which the images will be resized.
+    - n_bands (int): Number of bands in the image.
+    - tiles (int): Number of tiles. -- deprecated
+    - sample: (int): Sample parameter description. -- deprecated
+
+    Returns:
+    - gridded_predictions (geopandas.GeoDataFrame): GeoDataFrame containing gridded predictions and data 
+    from the corresponding census tract.
+    """
+    
+    import run_model
+    from tqdm import tqdm
+    from shapely.geometry import Polygon
+
+    def remove_sea_from_grid(grid):
+        
+        # Get the regio of interest
+        amba_costa = load_roi_coast_data(grid)
+        # Remove non relevant cells from grid
+        is_relevant = grid.set_crs(epsg=4326, allow_override=True).within(amba_costa)
+        grid = grid[is_relevant]
+
+        return grid
+
+    def load_roi_coast_data(grid):
+
+        from shapely import Polygon
+        
+        # Load país
+        pais = gpd.read_file(
+            rf"{path_datain}/Limites Argentina/pais.shp"
+        )        
+        # Get grid exterior
+        exterior = Polygon([
+            grid.total_bounds[[0, 1]],
+            grid.total_bounds[[2, 1]],
+            grid.total_bounds[[2, 3]],
+            grid.total_bounds[[0, 3]],
+            grid.total_bounds[[0, 1]],
+        ])        
+        # Clip
+        amba_costa = pais.clip(exterior)
+        # amba_costa.plot()
+        # Simplify
+        amba_costa.geometry = amba_costa.geometry.simplify(.001)
+        
+        return amba_costa.geometry.item() # Polygon with amba bounds
+    
+    def restrict_grid_to_ICPAG_area(grid, icpag):
+
+        from shapely import Polygon
+        
+        # Get convex hull of icpag
+        exterior = icpag.geometry.unary_union.convex_hull
+        
+        # Clip
+        grid = grid[grid.centroid.within(exterior)]    
+        
+        return grid # Polygon with amba bounds
+    
+    def get_grid_data(i):
+        # Decoding from the EagerTensor object. Extracts the number/value from the tensor
+        #   example: <tf.Tensor: shape=(), dtype=uint32, numpy=20> -> 20
+        i = i.numpy()
+
+        # initialize iterators & params
+        iteration = 0
+        image = np.zeros(shape=(n_bands, 0, 0))
+        total_bands = n_bands * len(stacked_images)
+        img_correct_shape = (total_bands, size, size)
+
+        # Get link, dataset and indicator value of the corresponding index
+        id_point, raster_point = grid.loc[i, ["id","point"]]
+
+        # Get data for selected point
+        radio_censal = icpag.loc[icpag.contains(raster_point)]
+        if radio_censal.empty:
+            # El radio censal no existe, es el medio del mar...
+            print("Radio censal vacio:", id_point ,raster_point)
+            image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
+            return image
+        
+        raster_point = (raster_point.x, raster_point.y)
+        link_name = radio_censal["link"].values[0]
+
+        cell_dataset = build_dataset.get_dataset_for_gdf(grid, datasets, id_point, id_var="id")
+
+        while (image.shape != img_correct_shape) & (iteration<=5):
+        
+            # Generate the image
+            image, boundaries = utils.stacked_image_from_census_tract(
+                dataset=cell_dataset,
+                polygon=None,
+                img_size=size,
+                n_bands=n_bands,
+                stacked_images=stacked_images,
+                point=raster_point
+            )
+
+            iteration +=1
+
+        if iteration>=5:
+            print(f"More than 5 interations for link {link_name}, moving to next link...")
+            image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
+            return image
+
+        # Reduce quality and process image
+        image = utils.process_image(image, resizing_size=resizing_size)
+        # np.save(fr"/mnt/d/Maestría/Tesis/Repo/data/data_out/grid_datasets/img_{i}_{id_point}.npy", image)
+        # print(f"Se creó /mnt/d/Maestría/Tesis/Repo/data/data_out/grid_datasets/img_{i}_{id_point}.npy")
+        return image
+
+    # Open grid of polygons for the corresponding parameters:
+    grid = gpd.read_parquet(
+        rf"{path_datain}/Grillas/grid_size{size}_tiles1.parquet"
+    )
+    grid = restrict_grid_to_ICPAG_area(grid, icpag)
+    grid = remove_sea_from_grid(grid)
+    grid = build_dataset.assign_datasets_to_gdf(grid, extents, verbose=False)
+    grid = grid.set_crs(epsg=4326, allow_override=True)
+    grid["point"] = grid.centroid
+    grid["bounds_geom"] = grid["geometry"]
+    grid = grid.set_geometry("point")
+    grid = grid.sjoin(icpag[["link", "var", "geometry"]], predicate="intersects")
+    grid = grid.reset_index(drop=True)
+    print("data loaded")
+    
+    ### TF Datasets
+    print("SE VAN A GENERAR:", grid.shape[0], "IMAGENES")
+    grid_dataset = tf.data.Dataset.from_generator(
+        lambda: list(range(grid.shape[0])),  # The index generator,
+        tf.uint32,
+    )  # Creates a dataset with only the indexes (0, 1, 2, 3, etc.)
+
+    grid_dataset = grid_dataset.map(
+        lambda i: tf.py_function(  # The actual data generator. Passes the index to the function that will process the data.
+            func=get_grid_data, inp=[i], Tout=[tf.uint8]
+        ),
+        num_parallel_calls=1,
+        deterministic=True,
+    )
+    grid_dataset = grid_dataset.batch(128)
+
+    ### Predictions
+    predictions = model.predict(grid_dataset)
+    
+    # Formateo dataframe para exportar:
+    grid = grid.rename(columns={"var":"real_value", "geometry":"link_polygon"})
+    grid["prediction"] = predictions
+    grid["prediction_error"] = grid["real_value"] - grid["prediction"]
+
+    return grid
 
 def get_batch_predictions(model, batch_images):
     """Computa las predicciones del batch
@@ -213,7 +379,7 @@ def _old_compute_custom_loss(
             images = np.load(file)
         else:
             print("Generando...")
-            link_dataset = build_dataset.get_dataset_for_link(
+            link_dataset = build_dataset.get_dataset_for_gdf(
                 df_test, sat_img_datasets, link
             )
             print("listo")
@@ -345,7 +511,7 @@ def _old_compute_predictions_dataset(
     # Cargar bases de datos
     datasets, extents = build_dataset.load_satellite_datasets()
     icpag = build_dataset.load_icpag_dataset()
-    icpag = build_dataset.assign_links_to_datasets(icpag, extents, verbose=False)
+    icpag = build_dataset.assign_datasets_to_gdf(icpag, extents, verbose=False)
 
     # Filtro Radios demasiado grandes (tardan horas en generar la cuadrícula y es puro campo...)
     if trim_size:
@@ -367,7 +533,7 @@ def _old_compute_predictions_dataset(
         if os.path.isfile(file):
             images = np.load(file)
         else:
-            link_dataset = build_dataset.get_dataset_for_link(icpag, datasets, link)
+            link_dataset = build_dataset.get_dataset_for_gdf(icpag, datasets, link)
             images, points, bounds = build_dataset.get_gridded_images_for_link(
                 link_dataset,
                 icpag,
@@ -473,7 +639,7 @@ def compute_custom_loss_all_epochs(
     # Load data
     print("Loading data...")
     sat_img_datasets, extents = build_dataset.load_satellite_datasets()
-    df_test = gpd.read_feather(rf"{path_dataout}/test_datasets/test_dataframe.feather")
+    df_test = gpd.read_feather(rf"{path_dataout}/test_datasets/{savename}_test_dataframe.feather")
     print("Data loaded!")
 
     # dir of the images
@@ -502,6 +668,7 @@ def compute_custom_loss_all_epochs(
     link_names = []
     real_values = []
     images = []
+
     for link in tqdm(links):
         # Obtener las imágenes del radio censal
         link_real_value = df_test.loc[df_test["link"] == link, "var"].values[0]
@@ -554,12 +721,12 @@ def compute_custom_loss_all_epochs(
     # Export csv with all MSE
     mse_test  = pd.DataFrame().from_dict(mse_epochs, orient="index", columns=["mse_test_rc"])
     mse_train = pd.read_csv(f"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")\
-                    [["mean_squared_error", "val_mean_squared_error"]]
+                    [["loss", "val_loss"]]
     metrics_epochs = mse_train.join(mse_test, how="outer").reset_index().rename(
                         columns={
                             "index":"epoch",
-                            "mean_squared_error":"mse_train",
-                            "val_mean_squared_error":"mse_test_img"
+                            "loss":"mse_train",
+                            "val_loss":"mse_test_img"
                         })
     metrics_epochs.to_csv(f"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv")
     print("Se creo el archivo:", f"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv")
@@ -667,7 +834,7 @@ def rerun_train_val_metrics(
     image_size=512,
     resizing_size=200,
     tiles=1,
-    nbands=4,
+    n_bands=4,
     stacked_images=[1],
     sample_size=1,
     small_sample=False,
@@ -697,7 +864,7 @@ def rerun_train_val_metrics(
         sat_img_dataset=sat_img_dataset,
         image_size=image_size,
         resizing_size=resizing_size,
-        nbands=nbands,
+        n_bands=n_bands,
         stacked_images=stacked_images,
         tiles=tiles,
         sample=sample_size,
@@ -706,13 +873,18 @@ def rerun_train_val_metrics(
         save_examples=True,
     )
     
-    store_dict = {"loss":[],"mean_absolute_error":[],"mean_squared_error":[],"val_loss":[],"val_mean_absolute_error":[],"val_mean_squared_error":[]}
-    for epoch in range(0, n_epochs, 10):
-        
+    # Compute metrics
+    # Check if the CSV file exists, if not, create it with the column names
+    csv_history_path = f"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv"
+    store_dict = {"epoch":[], "loss":[],"mean_absolute_error":[],"mean_squared_error":[],"val_loss":[],"val_mean_absolute_error":[],"val_mean_squared_error":[]}
+    pd.DataFrame(columns=store_dict.keys()).to_csv(csv_history_path, index=False)
+
+    for epoch in range(0, n_epochs, 5):
         print("Epoch", epoch+1)       
+        store_dict["epoch"] = epoch
         model = keras.models.load_model(f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}")  # load the model from file
 
-        losses = model.evaluate(train_dataset, steps=10000 * sample_size / batch_size)
+        losses = model.evaluate(train_dataset, steps=10_000 * sample_size / batch_size)
         store_dict["loss"] += [losses[0]]
         store_dict["mean_absolute_error"] += [losses[1]]
         store_dict["mean_squared_error"] += [losses[2]]
@@ -722,11 +894,14 @@ def rerun_train_val_metrics(
         store_dict["val_mean_absolute_error"] += [losses[1]]
         store_dict["val_mean_squared_error"] += [losses[2]]
         
-    history = pd.DataFrame().from_dict(store_dict)
-    history.to_csv(f"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
-     
-    # Compute metrics
-    hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
+        history = pd.DataFrame().from_dict(store_dict)
+        history.to_csv(csv_history_path, mode='a', header=False, index=False)
+        store_dict = {"epoch":[], "loss":[],"mean_absolute_error":[],"mean_squared_error":[],"val_loss":[],"val_mean_absolute_error":[],"val_mean_squared_error":[]}
+
+    # Plot metrics - Seteo bien el indice
+    hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv").set_index("epoch")
+    hist_df.to_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
+    
     plot_results(
         models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
         savename=savename,
@@ -734,7 +909,7 @@ def rerun_train_val_metrics(
         size=image_size,
         resizing_size=resizing_size,
         n_epochs=hist_df.index.max(),
-        n_bands=nbands,
+        n_bands=n_bands,
         stacked_images=stacked_images,
         generate=True,
     )
@@ -759,7 +934,7 @@ if __name__ == "__main__":
     #     generate=True,
     # )
     image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    sample_size = 10
+    sample_size = 5
     resizing_size = 128
     tiles = 1
 
@@ -768,9 +943,7 @@ if __name__ == "__main__":
     model = "mobnet_v3"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
     extra = "_nostack"
-    # Step 1: Run Pansharpening and Compression in QGIS to get the images in high resolution
-
-    # Step 3: Train the Model
+    
     initial_epoch = 141
     rerun_train_val_metrics(    
         model_name=model,
@@ -781,10 +954,10 @@ if __name__ == "__main__":
         image_size=image_size,
         sample_size=sample_size,
         resizing_size=resizing_size,
-        nbands=4,
+        n_bands=4,
         tiles=tiles,
         stacked_images=[1],
-        n_epochs=1000,
+        n_epochs=99,
         initial_epoch=initial_epoch,
         model_path=f"{path_repo}/data/data_out/models_by_epoch/{model}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}/{model}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}_{initial_epoch}",
         extra="_nostack",

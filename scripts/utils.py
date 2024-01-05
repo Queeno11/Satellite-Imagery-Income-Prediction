@@ -146,7 +146,8 @@ def stacked_image_from_census_tract(dataset, polygon, point=None, img_size=100, 
     if point is None:
         # Sample point from the polygon's box
         point = random_point_from_geometry(polygon)
-    
+        # point = polygon.centroid.x, polygon.centroid.y 
+        
     for size_multiplier in stacked_images:
         image_size = img_size*size_multiplier
         image_da = image_from_point(dataset, point, image_size)
@@ -302,9 +303,11 @@ def process_image(img, resizing_size, moveaxis=True):
         img = np.moveaxis(
             img, 0, 2
         )  # Move axis so the original [4, 512, 512] becames [512, 512, 4]
-    
-    image_size = img.shape[0]
-    if image_size != resizing_size:
+        image_size = img.shape[0]
+    else:
+        image_size = img.shape[2]
+
+    if image_size != resizing_size: #FIXME: Me las pasa a blanco y negro. Por qué?
         img = cv2.resize(
             img, dsize=(resizing_size, resizing_size), interpolation=cv2.INTER_CUBIC
         )
