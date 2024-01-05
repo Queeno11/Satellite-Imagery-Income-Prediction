@@ -257,7 +257,7 @@ def create_datasets(
         lambda i: tf.py_function(  # The actual data generator. Passes the index to the function that will process the data.
             func=get_test_data, inp=[i], Tout=[tf.uint8, tf.float32]
         ),
-        num_parallel_calls=tf.data.experimental.AUTOTUNE,
+        num_parallel_calls=1 # tf.data.experimental.AUTOTUNE,
     )
 
     test_dataset = test_dataset.batch(128).repeat(10)
@@ -737,8 +737,8 @@ def run(
         grid_predictions.plot_example(grid_preds, bbox, savename, datasets, extents, zona)
 
 if __name__ == "__main__":
-    image_size = 128 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    sample_size = 1
+    image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
+    sample_size = 5
     resizing_size = 128
     tiles = 1
 
@@ -746,7 +746,7 @@ if __name__ == "__main__":
     kind = "reg"
     model = "mobnet_v3_large"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = "_no_autotune"
+    extra = "_maybe_working"
     
     # Train the Model
     run(
@@ -761,6 +761,6 @@ if __name__ == "__main__":
         nbands=4,
         tiles=tiles,
         stacked_images=[1],
-        n_epochs=50,
+        n_epochs=100,
         extra=extra,
     )

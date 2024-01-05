@@ -76,8 +76,13 @@ def load_icpag_dataset(variable="ln_pred_inc_mean", trim=True):
     icpag = icpag.merge(collapse_link, on="link", how="left", validate="1:1")
 
     # Normalize ELL estimation:
-    icpag["var"] = (icpag[variable] - icpag[variable].mean()) / icpag[variable].std()
-
+    var_mean = icpag[variable].mean()
+    var_std = icpag[variable].std()
+    icpag["var"] = (icpag[variable] - var_mean) / var_std
+    
+    data_dict = {"mean": var_mean, "std": var_std}
+    pd.DataFrame().from_dict(data_dict, orient="index", columns=[variable]).to_csv(rf"{path_dataout}/scalars_{variable}_trim{trim}.csv")
+    
     return icpag
 
 

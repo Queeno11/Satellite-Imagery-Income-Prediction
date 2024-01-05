@@ -101,7 +101,7 @@ def generate_grid(savename, image_size, resizing_size, nbands, stacked_images):
     hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv")
     best_epoch = hist_df[hist_df.mse_test_rc.min()==hist_df.mse_test_rc].index.item()
     datasets, extents = build_dataset.load_satellite_datasets()
-    icpag = build_dataset.load_icpag_dataset()
+    icpag = build_dataset.load_icpag_dataset(trim=False)
     
     # Cargo modelo
     model_path = f"{path_dataout}/models_by_epoch/{savename}/{savename}_{best_epoch}"
@@ -128,7 +128,7 @@ def plot_example(grid_preds, bbox, modelname, datasets, extents, img_savename):
     name = utils.get_dataset_for_polygon(poly, extents)
 
     ds = datasets[name] 
-    icpag = build_dataset.load_icpag_dataset(variable="ln_pred_inc_mean")
+    icpag = build_dataset.load_icpag_dataset(variable="ln_pred_inc_mean", trim=False)
 
     import earthpy.plot as ep
     fig, axs = plt.subplots(1, 3, figsize=(15, 5))
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     
     # ## Cargo datasets
     datasets, extents = build_dataset.load_satellite_datasets()
-    icpag = build_dataset.load_icpag_dataset()
+    icpag = build_dataset.load_icpag_dataset(trim=False)
 
     ## Carga modelo
     model_path = f"{path_dataout}/models_by_epoch/{model_savename}/{model_savename}_{best_epoch}"

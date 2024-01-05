@@ -934,7 +934,7 @@ if __name__ == "__main__":
     #     generate=True,
     # )
     image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    sample_size = 10
+    sample_size = 5
     resizing_size = 128
     tiles = 1
 
