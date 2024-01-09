@@ -648,7 +648,10 @@ def run(
         If you just want to check if the code is working, set small_sample to True, by default False
     """
     log_dir = f"{path_logs}/{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
+    if len(stacked_images)>1:
+        savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}_stacked{extra}"
+    else:
+        savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
     batch_size = 64
 
 
@@ -667,7 +670,7 @@ def run(
         small_sample=small_sample
     )
 
-    ### Transform dataframes into datagenerators:
+    ## Transform dataframes into datagenerators:
     #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
     print("Setting up data generators...")
     train_dataset, test_dataset = create_datasets(
@@ -726,19 +729,21 @@ def run(
         n_epochs=hist_df.index.max(),
         n_bands=nbands,
         stacked_images=stacked_images,
-        generate=True,
+        generate=False,
     )
 
+    # Generate gridded predictions
     grid_preds, datasets, extents = grid_predictions.generate_grid(savename, image_size, resizing_size, nbands, stacked_images)
-    
+    grid_predictions.plot_grid(grid_preds, savename)
+
     ##############      BBOX a graficar    ##############  
     a_graficar = grid_predictions.get_areas_for_evaluation()
     for zona, bbox in a_graficar.items():
         grid_predictions.plot_example(grid_preds, bbox, savename, datasets, extents, zona)
 
 if __name__ == "__main__":
-    image_size = 128*2 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    sample_size = 5
+    image_size = 128 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
+    sample_size = 1
     resizing_size = 128
     tiles = 1
 
@@ -746,7 +751,8 @@ if __name__ == "__main__":
     kind = "reg"
     model = "mobnet_v3_large"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = "_maybe_working"
+    extra = ""
+    stacked_images = [1]
     
     # Train the Model
     run(
@@ -760,7 +766,7 @@ if __name__ == "__main__":
         resizing_size=resizing_size,
         nbands=4,
         tiles=tiles,
-        stacked_images=[1],
-        n_epochs=100,
+        stacked_images=stacked_images,
+        n_epochs=1000,
         extra=extra,
     )

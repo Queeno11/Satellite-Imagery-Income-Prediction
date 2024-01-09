@@ -381,6 +381,7 @@ def get_gridded_images_for_link(
     bounds = []
     tile_size = size // tiles
     tiles_generated = 0
+    total_bands = len(stacked_images) * n_bands
 
     link_dataset = crop_dataset_to_link(ds, icpag, link)
     # FIXME: add margin to the bounding box so left and bottom tiles are not cut. Margin should be the size of the tile - 1
@@ -414,10 +415,9 @@ def get_gridded_images_for_link(
                         n_bands=n_bands,
                         stacked_images=stacked_images,
                     )
-
                     counter += 1
 
-                    if image.shape == (n_bands, size, size):
+                    if image.shape == (total_bands, size, size):
                         # TODO: add a check to see if the image is contained in test bounds
                         image = utils.process_image(image, resizing_size)
 
