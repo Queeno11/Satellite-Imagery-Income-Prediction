@@ -37,7 +37,6 @@ import utils
 
 def get_areas_for_evaluation():
     a_graficar = {
-        # "AMBA" : [[-58.6715814736,-34.7982854506],[-58.2193109518,-34.7982854506],[-58.2193109518,-34.4570175785],[-58.6715814736,-34.4570175785],[-58.6715814736,-34.7982854506]],
         # Test area 2
         "VILLA_31" : [[-58.3942356256,-34.5947320752],[-58.3679285222,-34.5947320752],[-58.3679285222,-34.5760771024],[-58.3942356256,-34.5760771024],[-58.3942356256,-34.5947320752]],
         "VILLA_21_24" : [[-58.4108331428,-34.6551111569],[-58.3944394813,-34.6551111569],[-58.3944394813,-34.6437196838],[-58.4108331428,-34.6437196838],[-58.4108331428,-34.6551111569]],
@@ -140,10 +139,34 @@ def plot_example(grid_preds, bbox, modelname, datasets, extents, img_savename):
     gdf_plot_example(icpag, var="var", poly=poly, ax=axs[2])#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
     axs[2].set_title("Ingreso estructural por small area")
     fig.tight_layout()
+    
     savepath = f"{path_outputs}/{modelname}"
     os.makedirs(savepath, exist_ok=True)
     plt.savefig(f"{path_outputs}/{modelname}/{modelname}_{img_savename}", bbox_inches='tight', dpi=300)
     print("Se creó la imagen: ", f"{path_outputs}/{modelname}/{modelname}_{img_savename}.png")
+    
+def plot_grid(grid_preds, modelname):
+
+    AMBA = [[-58.6715814736,-34.7982854506],[-58.2193109518,-34.7982854506],[-58.2193109518,-34.4570175785],[-58.6715814736,-34.4570175785],[-58.6715814736,-34.7982854506]]
+
+    # BBox a poligono
+    poly = to_square(Polygon(AMBA))
+    
+    icpag = build_dataset.load_icpag_dataset(variable="ln_pred_inc_mean", trim=False)
+
+    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+
+    gdf_plot_example(grid_preds, var="prediction", poly=poly, ax=axs[0])#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
+    axs[0].set_title("Ingreso predicho por imagenes satelitales")
+    gdf_plot_example(icpag, var="var", poly=poly, ax=axs[1])#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
+    axs[1].set_title("Ingreso estructural por small area")
+    fig.tight_layout()
+    
+    savepath = f"{path_outputs}/{modelname}"
+    os.makedirs(savepath, exist_ok=True)
+    plt.savefig(f"{path_outputs}/{modelname}/{modelname}_amba", bbox_inches='tight', dpi=300)
+    print("Se creó la imagen: ", f"{path_outputs}/{modelname}/{modelname}_amba.png")
+
     
 if __name__ == "__main__":
     
@@ -180,6 +203,10 @@ if __name__ == "__main__":
     grid_preds.to_parquet(rf"{grid_preds_folder}/{model_savename}_{best_epoch}_predictions.parquet")
     
     ##############      BBOX a graficar    ##############    
+    AMBA = [[-58.6715814736,-34.7982854506],[-58.2193109518,-34.7982854506],[-58.2193109518,-34.4570175785],[-58.6715814736,-34.4570175785],[-58.6715814736,-34.7982854506]]
+
+    plot_grid(grid_preds, AMBA, model_savename, img_savename)
+    
     a_graficar = get_areas_for_evaluation()
     for zona, bbox in a_graficar.items():
         plot_example(bbox, model_savename, datasets, extents, best_epoch, zona)

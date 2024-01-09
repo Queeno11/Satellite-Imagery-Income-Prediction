@@ -234,11 +234,10 @@ def get_gridded_predictions_for_grid(
                 stacked_images=stacked_images,
                 point=raster_point
             )
-
             iteration +=1
 
         if iteration>=5:
-            print(f"More than 5 interations for link {link_name}, moving to next link...")
+            print(f"More than 5 interations for link {link_name}, moving to next image...")
             image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
             return image
 
@@ -286,6 +285,7 @@ def get_gridded_predictions_for_grid(
     grid = grid.rename(columns={"var":"real_value", "geometry":"link_polygon"})
     grid["prediction"] = predictions
     grid["prediction_error"] = grid["real_value"] - grid["prediction"]
+    grid = grid.set_geometry("bounds_geom")
 
     return grid
 
@@ -821,6 +821,8 @@ def plot_results(
         verbose=True,
         generate=generate,
     )
+    metrics_epochs = pd.read_csv(f"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv")
+
     plot_mse_over_epochs(metrics_epochs, savename, metric="mse", save=True)
     plot_predictions_vs_real(metrics_epochs, savename, quantiles=False, save=True)
     plot_predictions_vs_real(metrics_epochs, savename, quantiles=True,  save=True)
