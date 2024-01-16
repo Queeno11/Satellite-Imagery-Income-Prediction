@@ -95,11 +95,11 @@ def gdf_plot_example(gdf, var, poly, ax, vmin=None, vmax=None):
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
     
-def generate_grid(savename, image_size, resizing_size, nbands, stacked_images):
+def generate_grid(savename, image_size, resizing_size, nbands, stacked_images, year=2013):
     # Cargo datasets
     hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv")
     best_epoch = hist_df[hist_df.mse_test_rc.min()==hist_df.mse_test_rc].index.item()
-    datasets, extents = build_dataset.load_satellite_datasets()
+    datasets, extents = build_dataset.load_satellite_datasets(year=year)
     icpag = build_dataset.load_icpag_dataset(trim=False)
     
     # Cargo modelo
@@ -114,7 +114,7 @@ def generate_grid(savename, image_size, resizing_size, nbands, stacked_images):
     # Guardo la grilla
     grid_preds_folder = rf"{path_dataout}/gridded_predictions/{savename}"
     os.makedirs(grid_preds_folder, exist_ok=True)
-    grid_preds.to_parquet(rf"{grid_preds_folder}/{savename}_{best_epoch}_predictions.parquet")
+    grid_preds.to_parquet(rf"{grid_preds_folder}/{savename}_{best_epoch}_predictions_{year}.parquet")
     
     return grid_preds, datasets, extents
 
@@ -145,7 +145,7 @@ def plot_example(grid_preds, bbox, modelname, datasets, extents, img_savename):
     plt.savefig(f"{path_outputs}/{modelname}/{modelname}_{img_savename}", bbox_inches='tight', dpi=300)
     print("Se creó la imagen: ", f"{path_outputs}/{modelname}/{modelname}_{img_savename}.png")
     
-def plot_grid(grid_preds, modelname):
+def plot_grid(grid_preds, modelname, year=2013):
 
     AMBA = [[-58.6715814736,-34.7982854506],[-58.2193109518,-34.7982854506],[-58.2193109518,-34.4570175785],[-58.6715814736,-34.4570175785],[-58.6715814736,-34.7982854506]]
 
@@ -165,12 +165,12 @@ def plot_grid(grid_preds, modelname):
     savepath = f"{path_outputs}/{modelname}"
     os.makedirs(savepath, exist_ok=True)
     plt.savefig(f"{path_outputs}/{modelname}/{modelname}_amba", bbox_inches='tight', dpi=300)
-    print("Se creó la imagen: ", f"{path_outputs}/{modelname}/{modelname}_amba.png")
+    print("Se creó la imagen: ", f"{path_outputs}/{modelname}/{modelname}_amba_{year}.png")
 
     
 if __name__ == "__main__":
     
-    image_size = 128*2 # FIXME: VER SI ESTO FUNCIONA!!
+    image_size = 128 # FIXME: VER SI ESTO FUNCIONA!!
     sample_size = 1
     resizing_size = 128
     tiles = 1
@@ -178,35 +178,17 @@ if __name__ == "__main__":
     stacked_images = [1]
     
     kind = "reg"
-    model_name= "mobnet_v3"
+    model_name= "mobnet_v3_large"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = "_nostack"
+    year = 2018
+    extra = "_aug"
+    savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
 
-    best_epoch = 99
-    
-    model_savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
-    
-    # ## Cargo datasets
-    datasets, extents = build_dataset.load_satellite_datasets()
-    icpag = build_dataset.load_icpag_dataset(trim=False)
+    # Generate gridded predictions
+    grid_preds, datasets, extents = generate_grid(savename, image_size, resizing_size, n_bands, stacked_images, year=year)
+    plot_grid(grid_preds, savename, year)
 
-    ## Carga modelo
-    model_path = f"{path_dataout}/models_by_epoch/{model_savename}/{model_savename}_{best_epoch}"
-    model = keras.models.load_model(model_path)  # load the model from file
-    
-    ## Armar grilla de predicciones:
-    grid_preds = true_metrics.get_gridded_predictions_for_grid(
-        model, datasets, extents, icpag, image_size, resizing_size, n_bands=n_bands, stacked_images=stacked_images,
-    )
-    grid_preds_folder = rf"{path_dataout}/gridded_predictions/{model_savename}"
-    os.makedirs(grid_preds_folder, exist_ok=True)
-    grid_preds.to_parquet(rf"{grid_preds_folder}/{model_savename}_{best_epoch}_predictions.parquet")
-    
-    ##############      BBOX a graficar    ##############    
-    AMBA = [[-58.6715814736,-34.7982854506],[-58.2193109518,-34.7982854506],[-58.2193109518,-34.4570175785],[-58.6715814736,-34.4570175785],[-58.6715814736,-34.7982854506]]
-
-    plot_grid(grid_preds, AMBA, model_savename, img_savename)
-    
+    ##############      BBOX a graficar    ##############  
     a_graficar = get_areas_for_evaluation()
     for zona, bbox in a_graficar.items():
-        plot_example(bbox, model_savename, datasets, extents, best_epoch, zona)
+        plot_example(grid_preds, bbox, savename, datasets, extents, f"{zona}_{year}")

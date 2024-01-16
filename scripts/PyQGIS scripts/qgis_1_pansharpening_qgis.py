@@ -5,14 +5,15 @@ from os.path import dirname
 
 # Parameters for the algorithm
 images = [
-    "IMG_PHR1A_type_201302051412270_ORT_6741387101-tnumber_region.TIF",
-    "IMG_PHR1A_type_201302071358055_ORT_6741390101-tnumber_region.TIF",
-    "IMG_PHR1A_type_201302071358259_ORT_6741392101-tnumber_region.TIF",
+    "IMG_PHR1A_type_201803251357111_ORT_6742955101-tnumber_region.TIF",
+    "IMG_PHR1A_type_201808021357344_ORT_6742956101-tnumber_region.TIF",
+    "IMG_PHR1A_type_201808021357556_ORT_6742996101-tnumber_region.TIF",
 ]
+
 r_values = [1, 2, 3]
 c_values = [1, 2]
 types = [("P", "1"), ("MS", "2")]
-path = r"D:\Imagenes Satelitales\2013"
+path = r"F:\Imagenes Satelitales\2018"
 
 # Get the full list of files
 panchromatic = []
@@ -34,7 +35,8 @@ for img in images:
                 full_path = os.path.join(
                     path, satellite_pic_number, type_folder, filename
                 )
-                assert os.path.exists(full_path)
+                print(full_path)
+                assert os.path.exists(full_path), "Path doesn't exist"
 
                 if type == "P":
                     panchromatic += [full_path]

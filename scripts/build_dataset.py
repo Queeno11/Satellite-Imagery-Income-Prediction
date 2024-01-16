@@ -37,16 +37,16 @@ from tqdm import tqdm
 import utils
 import true_metrics
 
-def load_satellite_datasets(stretch=False):
+def load_satellite_datasets(year=2013, stretch=False):
     """Load satellite datasets and get their extents"""
 
-    files = os.listdir(rf"{path_satelites}/2013")
-    assert os.path.isdir(rf"{path_satelites}/2013")
+    files = os.listdir(rf"{path_satelites}/{year}")
+    assert os.path.isdir(rf"{path_satelites}/{year}")
     files = [f for f in files if f.endswith(".tif")]
-    assert all([os.path.isfile(rf"{path_satelites}/2013/{f}") for f in files])
+    assert all([os.path.isfile(rf"{path_satelites}/{year}/{f}") for f in files])
 
     datasets = {
-        f.replace(".tif", ""): (xr.open_dataset(rf"{path_satelites}/2013/{f}"))
+        f.replace(".tif", ""): (xr.open_dataset(rf"{path_satelites}/{year}/{f}"))
         for f in files
     }
     if stretch:
