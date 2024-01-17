@@ -72,18 +72,42 @@ def crop_dataset_by_polygon(ds, poly):
     x_max = np.array(x).max()
     y_min = np.array(y).min()
     y_max = np.array(y).max()
+    poly_extent = [x_min, x_max, y_min, y_max]
 
-    area_selected = ds.sel(x=slice(x_min, x_max), y=slice(y_max, y_min)).band_data.values
-
-    return area_selected
+    area_selected = ds.sel(x=slice(x_min, x_max), y=slice(y_max, y_min)).band_data
+    
+    x_min = area_selected.x.min().item()
+    x_max = area_selected.x.max().item()
+    y_min = area_selected.y.min().item()
+    y_max = area_selected.y.max().item()
+    image_extent = [x_min, x_max, y_min, y_max]
+    image = area_selected.values
+    
+    return image, image_extent, poly_extent
 
 def ds_plot_example(ds, poly, ax):
-    band_data_image = crop_dataset_by_polygon(ds, poly)
-    ep.plot_rgb(band_data_image, ax=ax) 
+    image, image_extent, poly_extent = crop_dataset_by_polygon(ds, poly)
+    image = image.astype(np.uint8)
+    image = utils.process_image(image, resizing_size=image.shape[1])[:,:,:3]
+    
+    ax.imshow(image, extent=image_extent)
+    ax.set_axis_off()
+    # Create mask for the hole extent to force mpl to plot the hole poly area (see https://github.com/matplotlib/matplotlib/issues/19374#issuecomment-1706627439)
+    size_mask=np.zeros((20,20))
+    size_mask=np.ma.masked_where(size_mask==0,size_mask) # This is a 20x20 array with all values masked
+    ax.imshow(size_mask, extent=poly_extent) # Plots the area of the hole poly (size_mask has nothing to plot)
 
-def gdf_plot_example(gdf, var, poly, ax, vmin=None, vmax=None):
-    gdf["plot_var"] = pd.qcut(gdf[var], 10) 
-    gdf.plot(column="plot_var", cmap="Spectral", ax=ax, aspect="equal")
+    
+def gdf_plot_example(gdf, var, poly, ax, bins=None, vmin=None, vmax=None, alpha=0.5):
+    
+    if bins is None: # Calculo los deciles 
+        gdf["plot_var"], bins = pd.qcut(gdf[var], 10, retbins=True, labels=False) 
+
+    else: # Clasifico con los deciles ya calculados
+        gdf["plot_var"] = pd.cut(gdf[var], bins=bins, labels=False)
+    
+    gdf = gdf.clip(poly)
+    gdf.plot(column="plot_var", cmap="Spectral", ax=ax, aspect="equal", alpha=alpha, zorder=10)
 
     x, y = poly.exterior.xy
     x_min = np.array(x).min()
@@ -95,27 +119,35 @@ def gdf_plot_example(gdf, var, poly, ax, vmin=None, vmax=None):
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
     
-def generate_grid(savename, image_size, resizing_size, nbands, stacked_images, year=2013):
+    return bins
+
+def generate_grid(savename, image_size, resizing_size, nbands, stacked_images, year=2013, generate=True):
     # Cargo datasets
-    hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv")
-    best_epoch = hist_df[hist_df.mse_test_rc.min()==hist_df.mse_test_rc].index.item()
     datasets, extents = build_dataset.load_satellite_datasets(year=year)
     icpag = build_dataset.load_icpag_dataset(trim=False)
-    
-    # Cargo modelo
-    model_path = f"{path_dataout}/models_by_epoch/{savename}/{savename}_{best_epoch}"
-    model = keras.models.load_model(model_path)  # load the model from file
+    hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv")
+    best_epoch = hist_df[hist_df.mse_test_rc.min()==hist_df.mse_test_rc].index.item()
 
-    # Genero la grilla
-    grid_preds = true_metrics.get_gridded_predictions_for_grid(
-        model, datasets, extents, icpag, image_size, resizing_size, n_bands=nbands, stacked_images=stacked_images,
-    )
-    
-    # Guardo la grilla
     grid_preds_folder = rf"{path_dataout}/gridded_predictions/{savename}"
     os.makedirs(grid_preds_folder, exist_ok=True)
-    grid_preds.to_parquet(rf"{grid_preds_folder}/{savename}_{best_epoch}_predictions_{year}.parquet")
-    
+
+    if generate:
+        
+        # Cargo modelo
+        model_path = f"{path_dataout}/models_by_epoch/{savename}/{savename}_{best_epoch}"
+        model = keras.models.load_model(model_path)  # load the model from file
+
+        # Genero la grilla
+        grid_preds = true_metrics.get_gridded_predictions_for_grid(
+            model, datasets, extents, icpag, image_size, resizing_size, n_bands=nbands, stacked_images=stacked_images,
+        )
+        
+        # Guardo la grilla
+        grid_preds.to_parquet(rf"{grid_preds_folder}/{savename}_{best_epoch}_predictions_{year}.parquet")
+    else:
+        print(f"Abriendo ", rf"{grid_preds_folder}/{savename}_{best_epoch}_predictions_{year}.parquet")
+        grid_preds = gpd.read_parquet(rf"{grid_preds_folder}/{savename}_{best_epoch}_predictions_{year}.parquet")
+
     return grid_preds, datasets, extents
 
 def plot_example(grid_preds, bbox, modelname, datasets, extents, img_savename):
@@ -124,20 +156,26 @@ def plot_example(grid_preds, bbox, modelname, datasets, extents, img_savename):
     poly = to_square(Polygon(bbox))
     
     # Carga datasets a memoria
-    name = utils.get_dataset_for_polygon(poly, extents)
+    ds_names = utils.get_datasets_for_polygon(poly, extents)
 
-    ds = datasets[name] 
     icpag = build_dataset.load_icpag_dataset(variable="ln_pred_inc_mean", trim=False)
 
-    import earthpy.plot as ep
     fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+    # Imagen satelital
+    for ds_name in ds_names:
+        ds = datasets[ds_name] 
+        ds_plot_example(ds, poly, ax=axs[0]) 
+        ds_plot_example(ds, poly, ax=axs[1]) 
+        ds_plot_example(ds, poly, ax=axs[2]) 
 
-    ds_plot_example(ds, poly, ax=axs[0]) 
     axs[0].set_title("Imagen satelital")
-    gdf_plot_example(grid_preds, var="prediction", poly=poly, ax=axs[1])#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
-    axs[1].set_title("Ingreso predicho por imagenes satelitales")
-    gdf_plot_example(icpag, var="var", poly=poly, ax=axs[2])#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
+    # Censo
+    bins = gdf_plot_example(icpag, var="var", poly=poly, ax=axs[2])#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
     axs[2].set_title("Ingreso estructural por small area")
+    # Predicciones
+    gdf_plot_example(grid_preds, var="prediction", poly=poly, ax=axs[1], bins=bins)#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
+    axs[1].set_title("Ingreso predicho por imagenes satelitales")
+    
     fig.tight_layout()
     
     savepath = f"{path_outputs}/{modelname}"
@@ -156,15 +194,15 @@ def plot_grid(grid_preds, modelname, year=2013):
 
     fig, axs = plt.subplots(1, 2, figsize=(10, 5))
 
-    gdf_plot_example(grid_preds, var="prediction", poly=poly, ax=axs[0])#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
+    gdf_plot_example(grid_preds, var="prediction", poly=poly, ax=axs[0], alpha=1)#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
     axs[0].set_title("Ingreso predicho por imagenes satelitales")
-    gdf_plot_example(icpag, var="var", poly=poly, ax=axs[1])#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
+    gdf_plot_example(icpag, var="var", poly=poly, ax=axs[1], alpha=1)#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
     axs[1].set_title("Ingreso estructural por small area")
     fig.tight_layout()
     
     savepath = f"{path_outputs}/{modelname}"
     os.makedirs(savepath, exist_ok=True)
-    plt.savefig(f"{path_outputs}/{modelname}/{modelname}_amba", bbox_inches='tight', dpi=300)
+    plt.savefig(f"{path_outputs}/{modelname}/{modelname}_amba_{year}", bbox_inches='tight', dpi=300)
     print("Se creó la imagen: ", f"{path_outputs}/{modelname}/{modelname}_amba_{year}.png")
 
     
@@ -180,15 +218,17 @@ if __name__ == "__main__":
     kind = "reg"
     model_name= "mobnet_v3_large"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    year = 2018
     extra = "_aug"
     savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
+    year = 2018
 
-    # Generate gridded predictions
-    grid_preds, datasets, extents = generate_grid(savename, image_size, resizing_size, n_bands, stacked_images, year=year)
-    plot_grid(grid_preds, savename, year)
+    for year in [2013, 2018]:
+        # Generate gridded predictions
+        grid_preds, datasets, extents = generate_grid(savename, image_size, resizing_size, n_bands, stacked_images, year=year, generate=False)
+        plot_grid(grid_preds, savename, year)
 
-    ##############      BBOX a graficar    ##############  
-    a_graficar = get_areas_for_evaluation()
-    for zona, bbox in a_graficar.items():
-        plot_example(grid_preds, bbox, savename, datasets, extents, f"{zona}_{year}")
+        ##############      BBOX a graficar    ##############  
+        a_graficar = get_areas_for_evaluation()
+        for zona, bbox in a_graficar.items():
+            print("zona: ", zona)
+            plot_example(grid_preds, bbox, savename, datasets, extents, f"{zona}_{year}")
