@@ -194,8 +194,8 @@ def create_datasets(
 
         # Augment dataset
         if type == "train":
-            # image = utils.augment_image(image)
-            image = image
+            image = utils.augment_image(image)
+            # image = image
 
         # np.save(fr"/mnt/d/Maestría/Tesis/Repo/data/data_out/test_arrays/img_{i}_{df_subset.iloc[i].link}.npy", image)
         return image, value
@@ -426,7 +426,7 @@ def get_callbacks(
     return [
         tensorboard_callback,
         # reduce_lr,
-        early_stopping_callback,
+        # early_stopping_callback,
         model_checkpoint_callback,
         csv_logger,
         custom_loss_callback,
@@ -655,7 +655,7 @@ def run(
     batch_size = 64
 
 
-    ### Set Model & loss function
+    ## Set Model & loss function
     model, loss, metrics = set_model_and_loss_function(
         model_name=model_name,
         kind=kind,
@@ -732,14 +732,28 @@ def run(
         generate=False,
     )
 
+
+    ### 2013
     # Generate gridded predictions
     grid_preds, datasets, extents = grid_predictions.generate_grid(savename, image_size, resizing_size, nbands, stacked_images)
     grid_predictions.plot_grid(grid_preds, savename)
 
-    ##############      BBOX a graficar    ##############  
     a_graficar = grid_predictions.get_areas_for_evaluation()
     for zona, bbox in a_graficar.items():
         grid_predictions.plot_example(grid_preds, bbox, savename, datasets, extents, zona)
+
+    ### 2018
+    # Generate gridded predictions
+    year=2018
+    grid_preds, datasets, extents = grid_predictions.generate_grid(savename, image_size, resizing_size, nbands, stacked_images, year=year)
+    grid_predictions.plot_grid(grid_preds, savename, year)
+
+    ##############      BBOX a graficar    ##############  
+    a_graficar = grid_predictions.get_areas_for_evaluation()
+    for zona, bbox in a_graficar.items():
+        grid_predictions.plot_example(grid_preds, bbox, savename, datasets, extents, f"{zona}_{year}")
+
+
 
 if __name__ == "__main__":
     image_size = 128 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
@@ -751,8 +765,8 @@ if __name__ == "__main__":
     kind = "reg"
     model = "mobnet_v3_large"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = ""
-    stacked_images = [1]
+    extra = "_aug"
+    stacked_images = [1, 3]
     
     # Train the Model
     run(
@@ -767,6 +781,6 @@ if __name__ == "__main__":
         nbands=4,
         tiles=tiles,
         stacked_images=stacked_images,
-        n_epochs=1000,
+        n_epochs=500,
         extra=extra,
     )

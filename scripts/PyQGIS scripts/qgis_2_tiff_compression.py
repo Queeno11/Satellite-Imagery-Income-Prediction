@@ -35,27 +35,29 @@ def get_sample_array(input_path, sample=100_000):
 
 # Parameters for the algorithm
 images = [
-    r"pansharpened_6741392101_R3C2.tif",
-    r"pansharpened_6741387101_R1C1.tif",
-    r"pansharpened_6741387101_R1C2.tif",
-    r"pansharpened_6741387101_R2C1.tif",
-    r"pansharpened_6741387101_R2C2.tif",
-    r"pansharpened_6741387101_R3C1.tif",
-    r"pansharpened_6741387101_R3C2.tif",
-    r"pansharpened_6741390101_R1C1.tif",
-    r"pansharpened_6741390101_R1C2.tif",
-    r"pansharpened_6741390101_R2C1.tif",
-    r"pansharpened_6741390101_R2C2.tif",
-    r"pansharpened_6741390101_R3C1.tif",
-    r"pansharpened_6741390101_R3C2.tif",
-    r"pansharpened_6741392101_R1C1.tif",
-    r"pansharpened_6741392101_R1C2.tif",
-    r"pansharpened_6741392101_R2C1.tif",
-    r"pansharpened_6741392101_R2C2.tif",
-    r"pansharpened_6741392101_R3C1.tif",
+    "pansharpened_6742996101_R3C2.tif",
+    "pansharpened_6742955101_R1C1.tif",
+    "pansharpened_6742955101_R1C2.tif",
+    "pansharpened_6742955101_R2C1.tif",
+    "pansharpened_6742955101_R2C2.tif",
+    "pansharpened_6742955101_R3C1.tif",
+    "pansharpened_6742955101_R3C2.tif",
+    "pansharpened_6742956101_R1C1.tif",
+    "pansharpened_6742956101_R1C2.tif",
+    "pansharpened_6742956101_R2C1.tif",
+    "pansharpened_6742956101_R2C2.tif",
+    "pansharpened_6742956101_R3C1.tif",
+    "pansharpened_6742956101_R3C2.tif",
+    "pansharpened_6742996101_R1C1.tif",
+    "pansharpened_6742996101_R1C2.tif",
+    "pansharpened_6742996101_R2C1.tif",
+    "pansharpened_6742996101_R2C2.tif",
+    "pansharpened_6742996101_R3C1.tif",
 ]
-path_in = r"d:\Maestría\Tesis\Repo\data\data_in\Pansharpened\2013"
-path_out = r"d:\Maestría\Tesis\Repo\data\data_in\Compressed\2013"
+
+
+path_in = r"F:\Imagenes Satelitales\2018\Pansharpened"
+path_out = r"d:\Maestría\Tesis\Repo\data\data_in\Compressed\2018"
 
 
 ## Compute percentiles over all the images
