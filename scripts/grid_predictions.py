@@ -182,7 +182,7 @@ def plot_example(grid_preds, bbox, modelname, datasets, extents, img_savename):
     os.makedirs(savepath, exist_ok=True)
     plt.savefig(f"{path_outputs}/{modelname}/{modelname}_{img_savename}", bbox_inches='tight', dpi=300)
     print("Se creó la imagen: ", f"{path_outputs}/{modelname}/{modelname}_{img_savename}.png")
-    
+
 def plot_grid(grid_preds, modelname, year=2013):
 
     AMBA = [[-58.6715814736,-34.7982854506],[-58.2193109518,-34.7982854506],[-58.2193109518,-34.4570175785],[-58.6715814736,-34.4570175785],[-58.6715814736,-34.7982854506]]
@@ -205,7 +205,14 @@ def plot_grid(grid_preds, modelname, year=2013):
     plt.savefig(f"{path_outputs}/{modelname}/{modelname}_amba_{year}", bbox_inches='tight', dpi=300)
     print("Se creó la imagen: ", f"{path_outputs}/{modelname}/{modelname}_amba_{year}.png")
 
-    
+def plot_all_examples(datasets, extents, grid_preds, savename, year):
+    plot_grid(grid_preds, savename, year)
+
+    ##############      BBOX a graficar    ##############  
+    a_graficar = get_areas_for_evaluation()
+    for zona, bbox in a_graficar.items():
+        plot_example(grid_preds, bbox, savename, datasets, extents, f"{zona}_{year}")
+
 if __name__ == "__main__":
     
     image_size = 128 # FIXME: VER SI ESTO FUNCIONA!!
@@ -225,10 +232,4 @@ if __name__ == "__main__":
     for year in [2013, 2018]:
         # Generate gridded predictions
         grid_preds, datasets, extents = generate_grid(savename, image_size, resizing_size, n_bands, stacked_images, year=year, generate=False)
-        plot_grid(grid_preds, savename, year)
-
-        ##############      BBOX a graficar    ##############  
-        a_graficar = get_areas_for_evaluation()
-        for zona, bbox in a_graficar.items():
-            print("zona: ", zona)
-            plot_example(grid_preds, bbox, savename, datasets, extents, f"{zona}_{year}")
+        plot_all_examples(datasets, extents, grid_preds, savename, year)

@@ -86,7 +86,7 @@ def load_icpag_dataset(variable="ln_pred_inc_mean", trim=True):
     return icpag
 
 
-def assign_datasets_to_gdf(gdf, extents, centroid=False, verbose=True):
+def assign_datasets_to_gdf(gdf, extents, year=2013, centroid=False, verbose=True):
     """Assign each geometry a dataset if the census tract falls within the extent of the dataset (images)"""
     import warnings
 
@@ -94,12 +94,17 @@ def assign_datasets_to_gdf(gdf, extents, centroid=False, verbose=True):
 
     if centroid:
         gdf["geometry"] = gdf.centroid
+    
+    if year is None:
+        colname = "dataset"
+    else:
+        colname = f"dataset_{year}"
         
     for name, bbox in extents.items():
-            gdf.loc[gdf.within(bbox), "dataset"] = name
+            gdf.loc[gdf.within(bbox), colname] = name
  
-    nan_links = gdf.dataset.isna().sum()
-    gdf = gdf[gdf.dataset.notna()]
+    nan_links = gdf[colname].isna().sum()
+    gdf = gdf[gdf[colname].notna()]
 
     if verbose:
         print("Links without images:", nan_links, "out of", len(gdf)+nan_links)
@@ -230,7 +235,7 @@ def assert_train_test_datapoint(bounds, wanted_type="train"):
     return istype
 
 
-def get_dataset_for_gdf(icpag, datasets, link, id_var="link"):
+def get_dataset_for_gdf(icpag, datasets, link, year=2013, id_var="link"):
     """Get dataset where the census tract is located.
 
     Parameters
@@ -243,88 +248,9 @@ def get_dataset_for_gdf(icpag, datasets, link, id_var="link"):
     -------
     - current_ds: xarray.Dataset, dataset where the census tract is located
     """
-    current_ds_name = icpag.loc[icpag[id_var] == link, "dataset"].values[0]
+    current_ds_name = icpag.loc[icpag[id_var] == link, f"dataset_{year}"].values[0]
     current_ds = datasets[current_ds_name]
     return current_ds
-
-
-def build_dataset(
-    image_size, sample_size, tiles=1, bias=2, variable="ln_pred_inc_mean"
-):
-    """Build dataset for training the model.
-
-    Generates images of size (4, image_size, image_size) and saves them in a folder in npy format.
-
-    Parameters
-    ----------
-    - image_size: int, size of the size of the image in pixels
-    - sample_size: int, number of images to generate per census tract
-    - tiles: int, number of tiles to generate per side of the image. For example, tiles = 2 will generate 4 tiles per image.
-    - variable: str, variable to predict. Has to be a variable in the ICPAG dataset.
-    """
-    # Load datasets
-    print("Cargando datasets...")
-    datasets, extents = load_satellite_datasets()
-    icpag = load_icpag_dataset(variable)
-    icpag = assign_datasets_to_gdf(icpag, extents)
-
-    # Create output folders
-    train_path = rf"{path_imgs}/train_size{image_size}_tiles{tiles}_sample{sample_size}"
-    os.makedirs(train_path, exist_ok=True)
-
-    # Generate images
-    print("Generando imágenes...")
-    metadata = {}
-    actual_size = image_size // tiles * tiles
-    for link in tqdm(icpag.link.unique()):
-        link_dataset = get_dataset_for_gdf(icpag, datasets, link)
-
-        for n in range(sample_size):
-            # FIXME: algo se rompe con n=2... por qué?
-            name = f"{link}_{n}"
-
-            img = np.zeros((4, 2, 2))
-
-            path_image = rf"{train_path}/{name}.npy"
-
-            # The image could be in the border of the dataset, so we need to try again until we get a valid image
-            img, point, bounds, total_bounds = utils.random_image_from_census_tract(
-                link_dataset, icpag, link, tiles=tiles, size=actual_size, bias=bias
-            )
-
-            metadata[name] = {
-                "link": link,
-                "sample": n,
-                "image": path_image,
-                "var": icpag.loc[icpag.link == link, "var"].values[0],
-                "point": point,
-                "x": point[0],
-                "y": point[1],
-                "tiles_boundaries": bounds,
-                "min_x": total_bounds[0],
-                "max_x": total_bounds[1],
-                "min_y": total_bounds[2],
-                "max_y": total_bounds[3],
-            }
-
-            np.save(
-                path_image,
-                img,
-            )
-
-    # Metadata to clean dataframe
-    metadata = pd.DataFrame().from_dict(metadata, orient="index")
-    metadata = metadata.dropna(how="any").reset_index(drop=True)
-
-    # Train and test split
-    metadata = split_train_test(metadata)
-
-    # Export
-    path_metadata = rf"{train_path}/metadata.csv"
-    metadata.to_csv(path_metadata)
-    print(
-        f"Se creó {path_metadata} y las imágenes para correr el modelo: train_size{image_size}_tiles{tiles}_sample{sample_size}."
-    )
 
 
 def crop_dataset_to_link(ds, icpag, link):
@@ -658,12 +584,3 @@ def stretch_dataset(ds, pixel_depth=32_767):
     ds = ds.where(ds.band_data > 0, 0)
     ds = ds.where(ds.band_data < pixel_depth, pixel_depth)
     return ds
-
-
-if __name__ == "__main__":
-    # Parameters
-    image_size = 512
-    sample_size = 10
-
-    # Generate dataset
-    build_dataset(image_size, sample_size, variable="pred_inc_mean")

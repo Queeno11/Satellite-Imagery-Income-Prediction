@@ -79,7 +79,8 @@ def generate_gridded_images(
     size,
     resizing_size,
     n_bands,
-    stacked_images
+    stacked_images,
+    year=2013,
 ):
     import geopandas as gpd
        
@@ -96,7 +97,7 @@ def generate_gridded_images(
         # Genera la imagen
         file = rf"{test_folder}/test_{link}.npy"
         link_dataset = build_dataset.get_dataset_for_gdf(
-            df_test, sat_img_datasets, link
+            df_test, sat_img_datasets, link, year=year
         )
         images, points, bounds = build_dataset.get_gridded_images_for_link(
             link_dataset,

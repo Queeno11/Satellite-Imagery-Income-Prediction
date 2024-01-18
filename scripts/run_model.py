@@ -31,9 +31,11 @@ import build_dataset
 import grid_predictions
 import utils
 
-import sys
-import pandas as pd
 import os
+import sys
+import scipy
+import random
+import pandas as pd
 import xarray as xr
 from typing import Iterator, List, Union, Tuple, Any
 from datetime import datetime
@@ -85,10 +87,14 @@ def create_train_test_dataframes(savename, small_sample=False):
     """
     ### Open dataframe with files and labels
     print("Reading dataset...")
-    sat_imgs_datasets, extents = build_dataset.load_satellite_datasets()
     df = build_dataset.load_icpag_dataset()
-    df = build_dataset.assign_datasets_to_gdf(df, extents, verbose=True)
-    print("Dataset loaded!")
+    all_years_datasets = {}
+    years = [2013, 2018]
+    for year in years:#, 2022]:
+        sat_imgs_datasets, extents = build_dataset.load_satellite_datasets(year=year)
+        df = build_dataset.assign_datasets_to_gdf(df, extents, year=year, verbose=True)
+        all_years_datasets[year] = sat_imgs_datasets
+    print("Datasets loaded!")
 
     print("Cleaning dataset...")
     # Clean dataframe and create datasets
@@ -101,7 +107,7 @@ def create_train_test_dataframes(savename, small_sample=False):
     df["min_x"] = df.bounds["minx"]
     df["max_x"] = df.bounds["maxx"]
     df = build_dataset.split_train_test(df)
-    df = df[["link", "dataset", "AREA", "var", "type", "geometry"]]
+    df = df[["link", "AREA", "var", "type", "geometry"] + [f"dataset_{year}" for year in years]]
 
     ### Train/Test
     list_of_datasets = []
@@ -120,20 +126,19 @@ def create_train_test_dataframes(savename, small_sample=False):
         "Se creó el archivo:", rf"{path_dataout}/train_datasets/{savename}_train_dataframe.feather"
     )
 
-    return df_train, df_test, sat_imgs_datasets
+    return df_train, df_test, all_years_datasets
 
 
 def create_datasets(
     df_train,
     df_test,
-    sat_img_dataset,
+    all_years_datasets,
     image_size,
     resizing_size,
     sample=1,
     nbands=4,
     tiles=1,
     stacked_images=[1],
-    batch_size=32,
     savename="",
     save_examples=True,
 ):
@@ -150,7 +155,12 @@ def create_datasets(
                 savename,
                 small_sample=False
             )
-
+        year = random.choices(
+            population=list(all_years_datasets.keys()),
+            weights=[0.8, 0.2],
+            k=1
+        )[0]
+        sat_img_dataset = all_years_datasets[year]
         # initialize iterators & params
         iteration = 0
         is_correct_type = False
@@ -161,7 +171,7 @@ def create_datasets(
         # Get link, dataset and indicator value of the corresponding index
         polygon = df_subset.iloc[i]["geometry"]
         value = df_subset.iloc[i]["var"]
-        link_dataset = sat_img_dataset[df_subset.iloc[i]["dataset"]]
+        link_dataset = sat_img_dataset[df_subset.iloc[i][f"dataset_{year}"]]
 
         while (is_correct_type == False) & (iteration<=5):
         
@@ -235,7 +245,6 @@ def create_datasets(
         ),
     )
 
-
     # FIXME: debería agregar esto...
     # train_dataset = train_dataset.filter(
     #     lambda img, value: (value ==-999_999)
@@ -262,53 +271,6 @@ def create_datasets(
 
     test_dataset = test_dataset.batch(128).repeat(10)
     
-    # tf_datasets = {}
-    # for type, params in train_test_dic.items():
-    #     df_subset = params["df"]
-    #     get_data_fn = params["get_data_fn"]
-    #     batch_size_subset = params["batch_size"]
-
-    #     # Generator for the index
-    #     dataset = tf.data.Dataset.from_generator(
-    #         lambda: list(range(df_subset.shape[0])),  # The index generator,
-    #         tf.uint8,
-    #     )  # Creates a dataset with only the indexes (0, 1, 2, 3, etc.)
-
-    #     dataset = dataset.map(
-    #         lambda i: tf.py_function(  # The actual data generator. Passes the index to the function that will process the data.
-    #             func=get_data_fn, inp=[i], Tout=[tf.uint8, tf.float32]
-    #         ),
-    #         num_parallel_calls=tf.data.experimental.AUTOTUNE,
-    #     )
-
-    #     if type == "train":
-    #         dataset = dataset.shuffle(
-    #             buffer_size=int(df_subset.shape[0]),
-    #             seed=825,
-    #             reshuffle_each_iteration=True,
-    #         )
-    #     # dataset = dataset.filter(
-    #     #     lambda img, value: (value ==-999_999)
-    #     # )  # Filter out links without image
-
-    #     if type == "train":
-    #         print(f"repeating ({sample} times) and prefetching...")
-    #         dataset = (
-    #             dataset.batch(batch_size_subset).prefetch(tf.data.AUTOTUNE)
-    #         )
-    #         print("Tamaño del train dataset", len(list(dataset)))
-
-    #     elif type == "test":
-    #         dataset = dataset.batch(batch_size_subset).repeat(10)
-
-    #     tf_datasets[type] = dataset
-
-    # train_dataset = tf_datasets["train"] 
-    # test_dataset = tf_datasets["test"]
-
-    # print("Tamaño del train dataset", len(list(train_dataset)))
-    # print("Tamaño del test dataset", len(list(test_dataset)))
-
     if save_examples == True:
         i = 0
         print("saving train/test examples")
@@ -329,18 +291,7 @@ def create_datasets(
 
 
 def get_callbacks(
-    model_name: str,
-    loss: str,
-    df_test: pd.DataFrame,
-    sat_img_datasets: xr.Dataset,
     savename,
-    tiles,
-    size,
-    resizing_size,
-    bias=2,
-    train_sample=1,
-    test_sample=1,
-    to8bit=True,
     logdir=None,
 ) -> List[Union[TensorBoard, EarlyStopping, ModelCheckpoint]]:
     """Accepts the model name as a string and returns multiple callbacks for training the keras model.
@@ -362,26 +313,6 @@ def get_callbacks(
             self.log_dir = log_dir
 
         def on_epoch_end(self, epoch, logs=None):
-            # print("Calculando el verdadero ECM. Esto puede tardar un rato...")
-            # # Calculate your custom loss here (replace this with your actual custom loss calculation)
-            # df_prediciones, mse = compute_custom_loss(
-            #     self.model,
-            #     df_test,
-            #     sat_img_datasets,
-            #     tiles,
-            #     size,
-            #     resizing_size,
-            #     bias,
-            #     test_sample,
-            #     to8bit,
-            #     verbose=False,
-            # )
-            # print(f"True Mean Squared Error: {mse}")
-            # print(f"True R squared: {1-mse/df_test['var'].var()}")
-
-            # # Log the custom loss to TensorBoard
-            # with tf.summary.create_file_writer(self.log_dir).as_default():
-            #     tf.summary.scalar("true_mean_squared_error", mse, step=epoch)
 
             # Save model
             os.makedirs(f"{path_dataout}/models_by_epoch/{savename}", exist_ok=True)
@@ -389,10 +320,6 @@ def get_callbacks(
                 f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}",
                 include_optimizer=True,
             )
-            # # Save predictions
-            # df_prediciones.to_csv(
-            #     f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}.csv"
-            # )
 
     tensorboard_callback = TensorBoard(
         log_dir=logdir, histogram_freq=1  # , profile_batch="100,200"
@@ -438,8 +365,6 @@ def run_model(
     lr: float,
     train_dataset: Iterator,
     test_dataset: Iterator,
-    sample_size: int,
-    batch_size: int,
     loss: str,
     epochs: int,
     metrics: List[str],
@@ -491,8 +416,8 @@ def run_model(
         model = model_function
         model.summary()
         # keras.utils.plot_model(model, to_file=model_name + ".png", show_shapes=True)
-        # optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
 
+        # optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
         # opt = tfa.optimizers.RectifiedAdam(learning_rate=lr)
         # # Nesterov Accelerated Gradient (NAG)
@@ -536,8 +461,7 @@ def plot_predictions_vs_real(df):
     la performance del modelo.
 
     """
-    import scipy
-
+    
     # Resultado general
     slope, intercept, r, p_value, std_err = scipy.stats.linregress(
         df["real"], df["pred"]
@@ -627,7 +551,6 @@ def set_model_and_loss_function(
 
 def run(
     model_name: str,
-    pred_variable: str,
     kind: str,
     weights=None,
     image_size=512,
@@ -652,8 +575,6 @@ def run(
         savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}_stacked{extra}"
     else:
         savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
-    batch_size = 64
-
 
     ## Set Model & loss function
     model, loss, metrics = set_model_and_loss_function(
@@ -665,7 +586,7 @@ def run(
     )
 
     ### Create train and test dataframes from ICPAG
-    df_train, df_test, sat_img_dataset = create_train_test_dataframes(
+    df_train, df_test, all_years_datasets = create_train_test_dataframes(
         savename,
         small_sample=small_sample
     )
@@ -676,30 +597,20 @@ def run(
     train_dataset, test_dataset = create_datasets(
         df_train=df_train,
         df_test=df_test,
-        sat_img_dataset=sat_img_dataset,
+        all_years_datasets=all_years_datasets,
         image_size=image_size,
         resizing_size=resizing_size,
         nbands=nbands,
         stacked_images=stacked_images,
         tiles=tiles,
         sample=sample_size,
-        batch_size=batch_size,
         savename=savename,
         save_examples=True,
     )
     # Get tensorboard callbacks and set the custom test loss computation
     #   at the end of each epoch
     callbacks = get_callbacks(
-        model_name,
-        loss,
         savename=savename,
-        df_test=df_test,
-        sat_img_datasets=sat_img_dataset,
-        tiles=tiles,
-        size=image_size,
-        resizing_size=resizing_size,
-        train_sample=sample_size,
-        test_sample=1,
         logdir=log_dir,
     )
 
@@ -709,8 +620,6 @@ def run(
         lr=0.0001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
         train_dataset=train_dataset,
         test_dataset=test_dataset,
-        sample_size=sample_size,
-        batch_size=batch_size,
         loss=loss,
         metrics=metrics,
         callbacks=callbacks,
@@ -732,27 +641,10 @@ def run(
         generate=False,
     )
 
-
-    ### 2013
-    # Generate gridded predictions
-    grid_preds, datasets, extents = grid_predictions.generate_grid(savename, image_size, resizing_size, nbands, stacked_images)
-    grid_predictions.plot_grid(grid_preds, savename)
-
-    a_graficar = grid_predictions.get_areas_for_evaluation()
-    for zona, bbox in a_graficar.items():
-        grid_predictions.plot_example(grid_preds, bbox, savename, datasets, extents, zona)
-
-    ### 2018
-    # Generate gridded predictions
-    year=2018
-    grid_preds, datasets, extents = grid_predictions.generate_grid(savename, image_size, resizing_size, nbands, stacked_images, year=year)
-    grid_predictions.plot_grid(grid_preds, savename, year)
-
-    ##############      BBOX a graficar    ##############  
-    a_graficar = grid_predictions.get_areas_for_evaluation()
-    for zona, bbox in a_graficar.items():
-        grid_predictions.plot_example(grid_preds, bbox, savename, datasets, extents, f"{zona}_{year}")
-
+    # Generate gridded predictions & plot examples
+    for year in [2013, 2018]:
+        grid_preds, datasets, extents = grid_predictions.generate_grid(savename, image_size, resizing_size, nbands, stacked_images, year=year, generate=True)
+        grid_predictions.plot_all_examples(datasets, extents, grid_preds, savename, year)
 
 
 if __name__ == "__main__":
@@ -765,13 +657,12 @@ if __name__ == "__main__":
     kind = "reg"
     model = "mobnet_v3_large"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = "_aug"
+    extra = "_2018_20p"
     stacked_images = [1, 3]
     
     # Train the Model
     run(
         model_name=model,
-        pred_variable=variable,
         kind=kind,
         small_sample=False,
         weights=None,
