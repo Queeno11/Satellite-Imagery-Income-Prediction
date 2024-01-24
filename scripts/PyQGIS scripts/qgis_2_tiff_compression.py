@@ -24,7 +24,7 @@ from osgeo import gdal_array
 #     return bands_percentiles
 
 
-def get_sample_array(input_path, sample=100_000):
+def get_sample_array(input_path, sample=5_000):
     rasterArray = gdal_array.LoadFile(input_path)  # Read raster as numpy array
     bands_data = {}
     for band in [0, 1, 2, 3]:
@@ -115,17 +115,18 @@ images = [
 
 
 path_in = r"D:\Maestría\Tesis\Repo\data\data_in\Pansharpened"
-path_out = r"D:\Maestría\Tesis\Repo\data\data_in\Compressed\2018"
+path_out = r"D:\Maestría\Tesis\Repo\data\data_in\Compressed\2022"
 
 
 ## Compute percentiles over all the images
 images_sample_data = {}
 for image in images:
+    print(image)
     # Load array
     rasterArray = gdal_array.LoadFile(
         f"{path_in}\{image}"
     )  # Read raster as numpy array
-
+    
     # Get percentile values for the input image
     images_sample_data[image] = get_sample_array(f"{path_in}\{image}")
 

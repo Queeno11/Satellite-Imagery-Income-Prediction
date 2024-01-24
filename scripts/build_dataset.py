@@ -21,6 +21,8 @@ path_datain = env["PATH_DATAIN"]
 path_dataout = env["PATH_DATAOUT"]
 path_scripts = env["PATH_SCRIPTS"]
 path_satelites = env["PATH_SATELITES"]
+path_nocturnas = env["PATH_NOCTURNAS"]
+path_landsat = env["PATH_LANDSAT"]
 path_logs = env["PATH_LOGS"]
 path_outputs = env["PATH_OUTPUTS"]
 path_imgs = env["PATH_IMGS"]
@@ -55,6 +57,45 @@ def load_satellite_datasets(year=2013, stretch=False):
     extents = {name: utils.get_dataset_extent(ds) for name, ds in datasets.items()}
 
     return datasets, extents
+
+def load_landsat_datasets(stretch=False):
+    """Load satellite datasets and get their extents"""
+
+    files = os.listdir(rf"{path_landsat}")
+    assert os.path.isdir(rf"{path_landsat}")
+    files = [f for f in files if f.endswith(".tif")]
+    assert all([os.path.isfile(rf"{path_landsat}/{f}") for f in files])
+
+    datasets = {
+        f.replace(".tif", ""): (normalize_landsat(xr.open_dataset(rf"{path_landsat}/{f}")))
+        for f in files
+    }
+    if stretch:
+        datasets = {name: stretch_dataset(ds) for name, ds in datasets.items()}
+
+    extents = {name: utils.get_dataset_extent(ds) for name, ds in datasets.items()}
+
+    return datasets, extents
+
+def load_nightlight_datasets(stretch=False):
+    """Load satellite datasets and get their extents"""
+
+    files = os.listdir(rf"{path_nocturnas}")
+    assert os.path.isdir(rf"{path_nocturnas}")
+    files = [f for f in files if f.endswith(".tif")]
+    assert all([os.path.isfile(rf"{path_nocturnas}/{f}") for f in files])
+
+    datasets = {
+        f.replace(".tif", ""): (xr.open_dataset(rf"{path_nocturnas}/{f}"))
+        for f in files
+    }
+    if stretch:
+        datasets = {name: stretch_dataset(ds) for name, ds in datasets.items()}
+
+    extents = {name: utils.get_dataset_extent(ds) for name, ds in datasets.items()}
+
+    return datasets, extents
+
 
 
 def load_icpag_dataset(variable="ln_pred_inc_mean", trim=True):
@@ -117,7 +158,7 @@ def assign_datasets_to_gdf(gdf, extents, year=2013, centroid=False, verbose=True
     return gdf
 
 
-def split_train_test(df):
+def split_train_test(df, buffer=0):
     """Blocks are counted from left to right, one count for test and one for train."""
 
     # Set bounds of test dataset blocks
@@ -141,11 +182,11 @@ def split_train_test(df):
 
     # These blocks are the train dataset.
     #   The hole image have to be inside the train region
-    df.loc[df.max_x < test1_min_x, "train_block"] = 1  # A la izqauierda de test1
+    df.loc[df.max_x+buffer < test1_min_x, "train_block"] = 1  # A la izqauierda de test1
     df.loc[
-        (df.min_x > test1_max_x) & (df.max_x < test2_min_x), "train_block"
+        (df.min_x-buffer > test1_max_x) & (df.max_x+buffer < test2_min_x), "train_block"
     ] = 2  # Entre test1 y test2
-    df.loc[df.min_x > test2_max_x, "train_block"] = 3  # A la derecha de test2
+    df.loc[df.min_x-buffer > test2_max_x, "train_block"] = 3  # A la derecha de test2
     # print(df.train_block.value_counts())
 
     # Put nans in the overlapping borders
@@ -583,4 +624,27 @@ def stretch_dataset(ds, pixel_depth=32_767):
     ds = (ds - minimum) / (maximum - minimum) * pixel_depth
     ds = ds.where(ds.band_data > 0, 0)
     ds = ds.where(ds.band_data < pixel_depth, pixel_depth)
+    return ds
+
+def normalize_landsat(ds):
+    band_data = ds.band_data.to_numpy()
+    for band in range(band_data.shape[0]):   
+        this_band = band_data[band]
+        
+        vmin = np.percentile(this_band, q=2)
+        vmax = np.percentile(this_band, q=98)
+
+        # High values
+        mask = this_band > vmax
+        this_band[mask] = vmax
+        
+        # low values
+        mask = this_band < vmin
+        this_band[mask] = vmin
+        
+        # Normalize
+        this_band = (this_band - vmin) / (vmax - vmin)
+        
+        band_data[band] = this_band * 255
+        
     return ds
