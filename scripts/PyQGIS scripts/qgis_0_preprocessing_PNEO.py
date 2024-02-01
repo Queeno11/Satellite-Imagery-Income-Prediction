@@ -10,14 +10,14 @@ from os.path import dirname
 
 # Parameters for the algorithm
 sat_captures = [
-    # "000047717_1_22_STD_A",
-    # "000047717_1_24_STD_A",
-    # "000047717_1_25_STD_A",
-    # "000047717_1_26_STD_A",
-    "000058605_1_3_STD_A",
-    "000058605_1_4_STD_A",
-    "000058605_1_7_STD_A",
-    "000058608_1_2_STD_A",
+    #"000047717_1_22_STD_A",
+    "000047717_1_24_STD_A",
+    #"000047717_1_25_STD_A",
+    #"000047717_1_26_STD_A",
+    # "000058605_1_3_STD_A",
+    # "000058605_1_4_STD_A",
+    # "000058605_1_7_STD_A",
+    # "000058608_1_2_STD_A",
 ]
 
 path = r"F:\Imagenes Satelitales\2022"
@@ -40,12 +40,16 @@ for sat_capture in sat_captures:
     rgb_files = [os.path.join(folder, f) for f in rgb_files]
     ned_files = [f.replace("_RGB_", "_NED_") for f in rgb_files]
     out_files = [f.replace("_RGB_", "_") for f in rgb_files]
-
+    
     assert len(rgb_files) == len(ned_files) == len(out_files)
 
     i = 0
     n_imgs = len(rgb_files)
     for rgb, ned, out in zip(rgb_files, ned_files, out_files):
+        out = os.path.split(out)[-1]
+        out = rf"E:\2022 imagenes\{out}"
+        if os.path.isfile(out):
+            continue
         # Step 1: Extract NIR band using gdal:translate
         result_extract_nir = processing.run(
             "gdal:translate",
@@ -57,8 +61,7 @@ for sat_capture in sat_captures:
             },
         )
         nir_only = QgsRasterLayer(result_extract_nir["OUTPUT"], "Extracted NIR")
-        out = os.path.split(out)[-1]
-        out = rf"E:\2022 imagenes\{out}"
+
         result_merge_rgb_nir = processing.run(
             "gdal:merge",
             {
