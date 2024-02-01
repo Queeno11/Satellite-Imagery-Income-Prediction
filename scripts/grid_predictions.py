@@ -121,9 +121,12 @@ def gdf_plot_example(gdf, var, poly, ax, bins=None, vmin=None, vmax=None, alpha=
     
     return bins
 
-def generate_grid(savename, image_size, resizing_size, nbands, stacked_images, year=2013, generate=True):
+def generate_grid(savename, all_years_datasets, all_years_extents, image_size, resizing_size, nbands, stacked_images, year=2013, generate=True):
+    
+    year_datasets = all_years_datasets[year]
+    year_extents = all_years_extents[year]
+
     # Cargo datasets
-    datasets, extents = build_dataset.load_landsat_datasets()#(year=year)
     icpag = build_dataset.load_icpag_dataset(trim=False)
     hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv")
     best_epoch = hist_df[hist_df.mse_test_rc.min()==hist_df.mse_test_rc].index.item()
@@ -139,7 +142,7 @@ def generate_grid(savename, image_size, resizing_size, nbands, stacked_images, y
 
         # Genero la grilla
         grid_preds = true_metrics.get_gridded_predictions_for_grid(
-            model, datasets, extents, icpag, image_size, resizing_size, n_bands=nbands, stacked_images=stacked_images,
+            model, year_datasets, year_extents, icpag, image_size, resizing_size, n_bands=nbands, stacked_images=stacked_images,
         )
         
         # Guardo la grilla
@@ -148,7 +151,7 @@ def generate_grid(savename, image_size, resizing_size, nbands, stacked_images, y
         print(f"Abriendo ", rf"{grid_preds_folder}/{savename}_{best_epoch}_predictions_{year}.parquet")
         grid_preds = gpd.read_parquet(rf"{grid_preds_folder}/{savename}_{best_epoch}_predictions_{year}.parquet")
 
-    return grid_preds, datasets, extents
+    return grid_preds
 
 def plot_example(grid_preds, bbox, modelname, datasets, extents, img_savename):
     
@@ -205,13 +208,16 @@ def plot_grid(grid_preds, modelname, year=2013):
     plt.savefig(f"{path_outputs}/{modelname}/{modelname}_amba_{year}", bbox_inches='tight', dpi=300)
     print("Se creó la imagen: ", f"{path_outputs}/{modelname}/{modelname}_amba_{year}.png")
 
-def plot_all_examples(datasets, extents, grid_preds, savename, year):
+def plot_all_examples(all_years_datasets, all_years_extents, grid_preds, savename, year):
+    year_datasets = all_years_datasets[year]
+    year_extents = all_years_extents[year]
+
     plot_grid(grid_preds, savename, year)
 
     ##############      BBOX a graficar    ##############  
     a_graficar = get_areas_for_evaluation()
     for zona, bbox in a_graficar.items():
-        plot_example(grid_preds, bbox, savename, datasets, extents, f"{zona}_{year}")
+        plot_example(grid_preds, bbox, savename, year_datasets, year_extents, f"{zona}_{year}")
 
 if __name__ == "__main__":
     

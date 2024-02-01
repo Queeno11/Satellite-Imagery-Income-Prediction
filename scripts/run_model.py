@@ -78,37 +78,43 @@ def enablePrint():
     sys.stdout = sys.__stdout__
 
 
-def create_train_test_dataframes(savename, sat_data="pleiades", small_sample=False):
+def open_datasets(sat_data="pleiades", years=[2013, 2018, 2022]):
+    sat_options = ["pleiades", "landsat"]
+    if sat_data not in sat_options:
+        raise ValueError("Invalid sat_data type. Expected one of: %s" % sat_options)
+    if len(years) > 1 and sat_data == "landsat":
+        raise ValueError("Landsat data only available in 2013.")
+
+    ### Open dataframe with files and labels
+    print("Reading dataset...")
+    df = build_dataset.load_icpag_dataset()
+
+    datasets_all_years = {}
+    extents_all_years = {}
+    for year in years:
+        if sat_data == "pleiades":
+            sat_imgs_datasets, extents = build_dataset.load_satellite_datasets(
+                year=year
+            )
+        elif sat_data == "landsat":
+            sat_imgs_datasets, extents = build_dataset.load_landsat_datasets()
+
+        df = build_dataset.assign_datasets_to_gdf(df, extents, year=year, verbose=True)
+        datasets_all_years[year] = sat_imgs_datasets
+        extents_all_years[year] = extents
+
+    print("Datasets loaded!")
+
+    return datasets_all_years, extents_all_years, df
+
+
+def create_train_test_dataframes(df, savename, small_sample=False):
     """Create train and test dataframes with the links and xr.datasets to use for training and testing
 
     Load the ICPAG dataset and assign the links to the corresponding xr.dataset, then split the census tracts
     into train and test. The train and test dataframes contain the links and xr.datasets to use for training and
     testing.
     """
-    ### Open dataframe with files and labels
-    print("Reading dataset...")
-    df = build_dataset.load_icpag_dataset()
-    all_years_datasets = {}
-
-    if sat_data == "pleiades":
-        years = [2013, 2018, 2022]
-        for year in years:
-            sat_imgs_datasets, extents = build_dataset.load_satellite_datasets(
-                year=year
-            )
-            df = build_dataset.assign_datasets_to_gdf(
-                df, extents, year=year, verbose=True
-            )
-            all_years_datasets[year] = sat_imgs_datasets
-    elif sat_data == "landsat":
-        sat_imgs_datasets, extents = build_dataset.load_landsat_datasets()
-        df = build_dataset.assign_datasets_to_gdf(df, extents, year=2013, verbose=True)
-        all_years_datasets[2013] = sat_imgs_datasets
-    print("Datasets loaded!")
-
-    print("Cleaning dataset...")
-    # Clean dataframe and create datasets
-    # df = df[df["sample"] <= 2]
     if small_sample:
         df = df.sample(2000, random_state=825).reset_index(drop=True)
 
@@ -145,7 +151,7 @@ def create_train_test_dataframes(savename, sat_data="pleiades", small_sample=Fal
         rf"{path_dataout}/train_datasets/{savename}_train_dataframe.feather",
     )
 
-    return df_train, df_test, all_years_datasets
+    return df_train, df_test
 
 
 def create_datasets(
@@ -169,13 +175,15 @@ def create_datasets(
         #   example: <tf.Tensor: shape=(), dtype=uint8, numpy=20> -> 20
         i = i.numpy()
 
-        if load:
-            df_train, df_test, sat_imgs_datasets = create_train_test_dataframes(
-                savename, small_sample=False
-            )
-        year = random.choices(
-            population=list(all_years_datasets.keys()), weights=[1], k=1
-        )[0]
+        years = list(all_years_datasets.keys())
+        if len(years)==1:
+            weights=[1]
+        elif len(years)==2:
+            weights=[.8,.2]
+        elif len(years)==2:
+            weights=[.8,.1,.1]
+            
+        year = random.choices(population=years, weights=weights, k=1)[0]
         sat_img_dataset = all_years_datasets[year]
         # initialize iterators & params
         iteration = 0
@@ -589,6 +597,8 @@ def run(
     sample_size=1,
     small_sample=False,
     n_epochs=100,
+    sat_data="pleiades",
+    years=[2013, 2018, 2022],
     extra="",
 ):
     """Run all the code of this file.
@@ -606,74 +616,83 @@ def run(
             f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
         )
 
-    # ## Set Model & loss function
-    # model, loss, metrics = set_model_and_loss_function(
-    #     model_name=model_name,
-    #     kind=kind,
-    #     bands=nbands * len(stacked_images),
-    #     resizing_size=resizing_size,
-    #     weights=weights,
-    # )
-
-    # ### Create train and test dataframes from ICPAG
-    df_train, df_test, all_years_datasets = create_train_test_dataframes(
-        savename, sat_data="landsat", small_sample=small_sample
+    ## Set Model & loss function
+    model, loss, metrics = set_model_and_loss_function(
+        model_name=model_name,
+        kind=kind,
+        bands=nbands * len(stacked_images),
+        resizing_size=resizing_size,
+        weights=weights,
     )
 
-    # ## Transform dataframes into datagenerators:
-    # #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
-    # print("Setting up data generators...")
-    # train_dataset, test_dataset = create_datasets(
-    #     df_train=df_train,
-    #     df_test=df_test,
-    #     all_years_datasets=all_years_datasets,
-    #     image_size=image_size,
-    #     resizing_size=resizing_size,
-    #     nbands=nbands,
-    #     stacked_images=stacked_images,
-    #     tiles=tiles,
-    #     sample=sample_size,
-    #     savename=savename,
-    #     save_examples=True,
-    # )
-    # # Get tensorboard callbacks and set the custom test loss computation
-    # #   at the end of each epoch
-    # callbacks = get_callbacks(
-    #     savename=savename,
-    #     logdir=log_dir,
-    # )
+    all_years_datasets, all_years_extents, df = open_datasets(
+        sat_data=sat_data, years=years
+    )
 
-    # # Run model
-    # model, history = run_model(
-    #     model_function=model,
-    #     lr=0.0001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
-    #     train_dataset=train_dataset,
-    #     test_dataset=test_dataset,
-    #     loss=loss,
-    #     metrics=metrics,
-    #     callbacks=callbacks,
-    #     epochs=n_epochs,
-    #     savename=savename,
-    # )
+    # ### Create train and test dataframes from ICPAG
+    df_train, df_test = create_train_test_dataframes(
+        df, savename, small_sample=small_sample
+    )
+
+    ## Transform dataframes into datagenerators:
+    #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
+    print("Setting up data generators...")
+    train_dataset, test_dataset = create_datasets(
+        df_train=df_train,
+        df_test=df_test,
+        all_years_datasets=all_years_datasets,
+        image_size=image_size,
+        resizing_size=resizing_size,
+        nbands=nbands,
+        stacked_images=stacked_images,
+        tiles=tiles,
+        sample=sample_size,
+        savename=savename,
+        save_examples=True,
+    )
+    # Get tensorboard callbacks and set the custom test loss computation
+    #   at the end of each epoch
+    callbacks = get_callbacks(
+        savename=savename,
+        logdir=log_dir,
+    )
+
+    # Run model
+    model, history = run_model(
+        model_function=model,
+        lr=0.0001,  # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
+        train_dataset=train_dataset,
+        test_dataset=test_dataset,
+        loss=loss,
+        metrics=metrics,
+        callbacks=callbacks,
+        epochs=n_epochs,
+        savename=savename,
+    )
 
     # Compute metrics
-    # hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
-    # true_metrics.plot_results(
-    #     models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
-    #     savename=savename,
-    #     tiles=tiles,
-    #     size=image_size,
-    #     resizing_size=resizing_size,
-    #     n_epochs=hist_df.index.max(),
-    #     n_bands=nbands,
-    #     stacked_images=stacked_images,
-    #     generate=True,
-    # )
+    hist_df = pd.read_csv(
+        rf"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv"
+    )
+    true_metrics.plot_results(
+        models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
+        savename=savename,
+        datasets=all_years_datasets[2013],
+        tiles=tiles,
+        size=image_size,
+        resizing_size=resizing_size,
+        n_epochs=hist_df.index.max(),
+        n_bands=nbands,
+        stacked_images=stacked_images,
+        generate=True,
+    )
 
     # Generate gridded predictions & plot examples
     for year in all_years_datasets.keys():
-        grid_preds, datasets, extents = grid_predictions.generate_grid(
+        grid_preds = grid_predictions.generate_grid(
             savename,
+            all_years_datasets,
+            all_years_extents,
             image_size,
             resizing_size,
             nbands,
@@ -682,23 +701,25 @@ def run(
             generate=True,
         )
         grid_predictions.plot_all_examples(
-            datasets, extents, grid_preds, savename, year
+            all_years_datasets, all_years_extents, grid_preds, savename, year
         )
 
 
 if __name__ == "__main__":
-    image_size = 32  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
+    image_size = 128  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
     sample_size = 1
-    resizing_size = 32
+    resizing_size = 128
     tiles = 1
 
     variable = "ln_pred_inc_mean"
     kind = "reg"
     model = "mobnet_v3_large"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = "_landsat"
+    extra = "_test"
     stacked_images = [1]
-
+    sat_data = "pleiades"
+    years = [2013, 2018]
+    nbands = 4
     # Train the Model
     run(
         model_name=model,
@@ -708,9 +729,11 @@ if __name__ == "__main__":
         image_size=image_size,
         sample_size=sample_size,
         resizing_size=resizing_size,
-        nbands=10,
+        nbands=nbands,
         tiles=tiles,
         stacked_images=stacked_images,
-        n_epochs=500,
+        n_epochs=3,
+        sat_data=sat_data,
+        years=years,
         extra=extra,
     )

@@ -41,9 +41,11 @@ import true_metrics
 
 def load_satellite_datasets(year=2013, stretch=False):
     """Load satellite datasets and get their extents"""
-
+    
+    if not os.path.isdir(rf"{path_satelites}/{year}"):
+        raise ValueError(f"Year {year} images not found.")
+    
     files = os.listdir(rf"{path_satelites}/{year}")
-    assert os.path.isdir(rf"{path_satelites}/{year}")
     files = [f for f in files if f.endswith(".tif")]
     assert all([os.path.isfile(rf"{path_satelites}/{year}/{f}") for f in files])
 

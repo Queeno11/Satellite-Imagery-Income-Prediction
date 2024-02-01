@@ -466,147 +466,10 @@ def _old_compute_custom_loss(
 
     return df_preds, mse
 
-
-def _old_compute_predictions_dataset(
-    model,
-    metadata,
-    tiles,
-    size,
-    resizing_size,
-    bias,
-    sample,
-    to8bit,
-    verbose=False,
-    trim_size=True,
-):
-    """
-    Calcula predicciones y errores para un dataset determinado.
-
-    Carga las bases necesarias, itera sobre los radios censales, genera las imágenes
-    en forma de grilla y compara las predicciones de esas imágenes con el valor real
-    del radio censal.
-
-    Parameters:
-    -----------
-    metadata: pd.DataFrame, dataframe con los metadatos de las imágenes
-    tiles: int, cantidad de imágenes a generar por lado
-    size: int, tamaño de la imagen a generar, en píxeles
-    resizing_size: int, tamaño al que se redimensiona la imagen
-    bias: int, cantidad de píxeles que se mueve el punto aleatorio de las tiles
-    to8bit: bool, si es True, convierte la imagen a 8 bits
-
-    Returns:
-    --------
-    mse: float, error cuadrático medio del conjunto de predicción
-
-    """
-    import random
-
-    if verbose == False:
-        blockPrint()
-
-    # Inicializo arrays
-    batch_images = np.empty((0, resizing_size, resizing_size, 4))
-    batch_link_names = np.empty((0))
-    batch_real_values = np.empty((0))
-    batch_predictions = np.empty((0))
-    all_link_names = np.empty((0))
-    all_predictions = np.empty((0))
-    all_real_values = np.empty((0))
-
-    # Cargar bases de datos
-    datasets, extents = build_dataset.load_satellite_datasets()
-    icpag = build_dataset.load_icpag_dataset()
-    icpag = build_dataset.assign_datasets_to_gdf(icpag, extents, verbose=False)
-
-    # Filtro Radios demasiado grandes (tardan horas en generar la cuadrícula y es puro campo...)
-    if trim_size:
-        icpag = icpag[icpag["AREA"] <= 4000000]  # Remove rc that are too big
-    links = metadata["link"].astype(str).str.zfill(9).unique()
-    links = [link for link in links if link in icpag.link.unique()]
-    # links = random.sample(links, 30)
-    len_links = len(links)
-
-    # Creo la carpeta de test
-    test_folder = rf"{path_dataout}/test_size{size}_tiles{tiles}_sample{sample}"
-    os.makedirs(test_folder, exist_ok=True)
-
-    # Loop por radio censal. Si está la imagen la usa, sino la genera.
-    for n, link in enumerate(links):
-        print(f"{link}: {n}/{len_links}")
-        # Abre/genera la imagen
-        file = rf"{test_folder}/test_{link}.npy"
-        if os.path.isfile(file):
-            images = np.load(file)
-        else:
-            link_dataset = build_dataset.get_dataset_for_gdf(icpag, datasets, link)
-            images, points, bounds = build_dataset.get_gridded_images_for_link(
-                link_dataset,
-                icpag,
-                link,
-                tiles,
-                size,
-                resizing_size,
-                bias,
-                sample,
-                to8bit,
-            )
-            if len(images) == 0:
-                # No images where returned from this census tract, so no error to compute...
-                continue
-            images = np.array(images)
-            np.save(file, images)
-
-        # Obtener el error de estimación del radio censal
-        link_real_value = metadata.loc[metadata["link"] == int(link), "var"].values[0]
-
-        # Agrega al batch de valores reales / imagenes para la prediccion
-        q_images = images.shape[0]
-        link_names = np.array([link] * q_images)
-        real_values = np.array([link_real_value] * q_images)
-
-        batch_images = np.concatenate([images, batch_images], axis=0)
-        batch_link_names = np.concatenate([link_names, batch_link_names], axis=0)
-        batch_real_values = np.concatenate([real_values, batch_real_values], axis=0)
-
-        if batch_real_values.shape[0] > 128:
-            batch_predictions = get_batch_predictions(model, batch_images)
-
-            # Store data
-            all_link_names = np.concatenate([all_link_names, batch_link_names])
-            all_predictions = np.concatenate([all_predictions, batch_predictions])
-            all_real_values = np.concatenate([all_real_values, batch_real_values])
-
-            # Restore batches to empty
-            batch_images = np.empty((0, resizing_size, resizing_size, 4))
-            batch_link_names = np.empty((0))
-            batch_real_values = np.empty((0))
-            batch_predictions = np.empty((0))
-
-    if verbose == False:
-        enablePrint()
-
-    # Creo dataframe para exportar:
-    d = {
-        "link": all_link_names,
-        "predictions": all_predictions,
-        "real_value": all_real_values,
-    }
-    df_preds = pd.DataFrame(data=d)
-
-    df_preds["mean_prediction"] = df_preds.groupby(by="link").predictions.transform(
-        "mean"
-    )
-    df_preds["error"] = df_preds["mean_prediction"] - df_preds["real_value"]
-    df_preds["sq_error"] = df_preds["error"] ** 2
-    mse = df_preds.drop_duplicates(subset=["link"]).sq_error.mean()
-
-    return df_preds, mse
-
-
 def compute_custom_loss_all_epochs(
     models_dir,
     savename,
+    datasets,
     tiles,
     size,
     resizing_size,
@@ -644,7 +507,6 @@ def compute_custom_loss_all_epochs(
 
     # Load data
     print("Loading data...")
-    sat_img_datasets, extents = build_dataset.load_landsat_datasets()
     df_test = gpd.read_feather(rf"{path_dataout}/test_datasets/{savename}_test_dataframe.feather")
     print("Data loaded!")
 
@@ -657,13 +519,14 @@ def compute_custom_loss_all_epochs(
         print("Generando imágenes en grilla...")
         test_folder = generate_gridded_images(
             df_test,
-            sat_img_datasets,
+            datasets,
             test_folder,
             tiles,
             size,
             resizing_size,
             n_bands,
-            stacked_images
+            stacked_images,
+            year=2013
         )
 
     links = np.load(rf"{test_folder}/valid_links.npy")
@@ -807,6 +670,7 @@ def plot_predictions_vs_real(mse_df, modelname, quantiles=False, last_training=F
 def plot_results(
     models_dir,
     savename,
+    datasets, # Only for 2013!! all_years_datasets have to be filtered before
     tiles=1,
     size=128,
     resizing_size=128,
@@ -818,6 +682,7 @@ def plot_results(
     metrics_epochs = compute_custom_loss_all_epochs(
         models_dir=models_dir,
         savename=savename,
+        datasets=datasets,
         tiles=tiles,
         size=size,
         resizing_size=resizing_size,
