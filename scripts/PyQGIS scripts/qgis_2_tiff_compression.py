@@ -1,5 +1,6 @@
 import processing
 import numpy as np
+import os
 from qgis.core import (
     QgsCoordinateReferenceSystem,
     QgsRasterLayer,
@@ -24,7 +25,7 @@ from osgeo import gdal_array
 #     return bands_percentiles
 
 
-def get_sample_array(input_path, sample=100_000):
+def get_sample_array(input_path, sample=5_000):
     rasterArray = gdal_array.LoadFile(input_path)  # Read raster as numpy array
     bands_data = {}
     for band in [0, 1, 2, 3]:
@@ -34,89 +35,11 @@ def get_sample_array(input_path, sample=100_000):
 
 
 # Parameters for the algorithm
-images = [
-"pansharpened_202212201401079_R4C2.tif",
-"pansharpened_202211011409151_R1C1.tif",
-"pansharpened_202211011409151_R1C2.tif",
-"pansharpened_202211011409151_R1C3.tif",
-"pansharpened_202211011409151_R2C1.tif",
-"pansharpened_202211011409151_R2C3.tif",
-"pansharpened_202211011409151_R3C1.tif",
-"pansharpened_202211011409151_R3C3.tif",
-"pansharpened_202211011409151_R4C1.tif",
-"pansharpened_202211011409151_R4C2.tif",
-"pansharpened_202211011409151_R4C3.tif",
-"pansharpened_202211011409151_R5C1.tif",
-"pansharpened_202211011409151_R5C2.tif",
-"pansharpened_202211011409151_R5C3.tif",
-"pansharpened_202211011409151_R6C1.tif",
-"pansharpened_202211011409151_R6C2.tif",
-"pansharpened_202211011409151_R6C3.tif",
-"pansharpened_202211011409151_R7C1.tif",
-"pansharpened_202211011409151_R7C2.tif",
-"pansharpened_202211011409151_R7C3.tif",
-"pansharpened_202211011409151_R8C1.tif",
-"pansharpened_202211011409151_R8C2.tif",
-"pansharpened_202211011409151_R8C3.tif",
-"pansharpened_202211031357171_R1C1.tif",
-"pansharpened_202211031357171_R1C2.tif",
-"pansharpened_202211031357171_R1C3.tif",
-"pansharpened_202211031357171_R1CC.tif",
-"pansharpened_202211031357171_R2C1.tif",
-"pansharpened_202211031357171_R2C2.tif",
-"pansharpened_202211031357171_R2C3.tif",
-"pansharpened_202211031357171_R3C1.tif",
-"pansharpened_202211031357171_R3C2.tif",
-"pansharpened_202211031357171_R3C3.tif",
-"pansharpened_202211031357171_R4C2.tif",
-"pansharpened_202211031357171_R4C3.tif",
-"pansharpened_202211031357171_R5C3.tif",
-"pansharpened_202211031357171_R6C3.tif",
-"pansharpened_202211031357171_R7C3.tif",
-"pansharpened_202211031357171_R8C1.tif",
-"pansharpened_202211031357396_R1C1.tif",
-"pansharpened_202211031357396_R1C2.tif",
-"pansharpened_202211031357396_R2C2.tif",
-"pansharpened_202211031357396_R3C2.tif",
-"pansharpened_202211031357396_R4C1.tif",
-"pansharpened_202211031357396_R4C2.tif",
-"pansharpened_202211031357396_R5C1.tif",
-"pansharpened_202211031357396_R5C2.tif",
-"pansharpened_202211031357396_R6C1.tif",
-"pansharpened_202211031357396_R6C2.tif",
-"pansharpened_202211031357574_R1C1.tif",
-"pansharpened_202211031357574_R1C2.tif",
-"pansharpened_202211031357574_R2C2.tif",
-"pansharpened_202211031357574_R3C2.tif",
-"pansharpened_202211031357574_R5C2.tif",
-"pansharpened_202211031357574_R6C1.tif",
-"pansharpened_202211031357574_R6C2.tif",
-"pansharpened_202211031357574_R7C1.tif",
-"pansharpened_202211031357574_R7C2.tif",
-"pansharpened_202211031357574_R8C1.tif",
-"pansharpened_202211031357574_R8C2.tif",
-"pansharpened_202212041353517_R4C2.tif",
-"pansharpened_202212041353517_R5C1.tif",
-"pansharpened_202212041353517_R5C2.tif",
-"pansharpened_202212041354167_R1C1.tif",
-"pansharpened_202212041354167_R1C2.tif",
-"pansharpened_202212041354167_R2C1.tif",
-"pansharpened_202212041354167_R4C1.tif",
-"pansharpened_202212041354167_R4C2.tif",
-"pansharpened_202212051412329_R1C1.tif",
-"pansharpened_202212051412329_R2C1.tif",
-"pansharpened_202212051412329_R3C1.tif",
-"pansharpened_202212201401079_R1C2.tif",
-"pansharpened_202212201401079_R2C2.tif",
-"pansharpened_202212201401079_R3C1.tif",
-"pansharpened_202212201401079_R3C2.tif",
-"pansharpened_202212201401079_R4C1.tif",
-]
-
-
 path_in = r"D:\Maestría\Tesis\Repo\data\data_in\Pansharpened"
-path_out = r"D:\Maestría\Tesis\Repo\data\data_in\Compressed\2018"
+path_out = r"D:\Maestría\Tesis\Repo\data\data_in\Compressed\2022"
 
+images = os.listdir(path_in)
+images = [img for img in images if img.endswith(".tif")]
 
 ## Compute percentiles over all the images
 images_sample_data = {}
@@ -147,13 +70,22 @@ scale_options = " ".join(
         for i, (min_val, max_val) in bands_percentiles.items()
     ]
 )
+with open(f"{path_in}/scale_options.txt", "w") as text_file:
+    text_file.write(scale_options)
+
+## Read scale options (previous line might take a lot of time)
+with open(rf"{path_in}/scale_options.txt", "r") as text_file:
+    scale_options = text_file.read()
+
 
 i = 0
 n_imgs = len(images)
 for image in images:
     ## Process the layr
     # Load layer
-    layer = QgsRasterLayer(f"{path_in}/{image}")
+    file_in = f"{path_in}/{image}"
+    file_out = f"{path_out}/{image}"
+    layer = QgsRasterLayer(file_in)
 
     # Adjust gamma and brightness
     contrastFilter = QgsBrightnessContrastFilter()
@@ -177,8 +109,11 @@ for image in images:
             "OPTIONS": "COMPRESS=JPEG|JPEG_QUALITY=75|TILED=Yes",
             "EXTRA": scale_options,
             "DATA_TYPE": 1,
-            "OUTPUT": f"{path_out}/{image}",
+            "OUTPUT": file_out,
         },
     )
-    print(f"{path_out}/{image} created. {n_imgs-i} images remains.")
+    QgsProject.instance().removeMapLayer(layer.id())
+    assert os.path.isfile(file_out)
+    os.remove(file_in)
+    print(f"{file_out} created. {n_imgs-i} images remains.")
     i += 1
