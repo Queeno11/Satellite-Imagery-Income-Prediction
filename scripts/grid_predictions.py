@@ -123,7 +123,7 @@ def gdf_plot_example(gdf, var, poly, ax, bins=None, vmin=None, vmax=None, alpha=
 
 def generate_grid(savename, image_size, resizing_size, nbands, stacked_images, year=2013, generate=True):
     # Cargo datasets
-    datasets, extents = build_dataset.load_satellite_datasets(year=year)
+    datasets, extents = build_dataset.load_landsat_datasets()#(year=year)
     icpag = build_dataset.load_icpag_dataset(trim=False)
     hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv")
     best_epoch = hist_df[hist_df.mse_test_rc.min()==hist_df.mse_test_rc].index.item()

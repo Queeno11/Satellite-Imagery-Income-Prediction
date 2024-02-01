@@ -52,7 +52,7 @@ from tensorflow.keras.callbacks import (
     TensorBoard,
     EarlyStopping,
     ModelCheckpoint,
-    CSVLogger
+    CSVLogger,
 )
 from tensorflow.keras.models import Sequential
 import cv2
@@ -89,14 +89,18 @@ def create_train_test_dataframes(savename, sat_data="pleiades", small_sample=Fal
     print("Reading dataset...")
     df = build_dataset.load_icpag_dataset()
     all_years_datasets = {}
-    
-    if sat_data=="pleiades":
+
+    if sat_data == "pleiades":
         years = [2013, 2018, 2022]
         for year in years:
-            sat_imgs_datasets, extents = build_dataset.load_satellite_datasets(year=year)
-            df = build_dataset.assign_datasets_to_gdf(df, extents, year=year, verbose=True)
+            sat_imgs_datasets, extents = build_dataset.load_satellite_datasets(
+                year=year
+            )
+            df = build_dataset.assign_datasets_to_gdf(
+                df, extents, year=year, verbose=True
+            )
             all_years_datasets[year] = sat_imgs_datasets
-    elif sat_data=="landsat":
+    elif sat_data == "landsat":
         sat_imgs_datasets, extents = build_dataset.load_landsat_datasets()
         df = build_dataset.assign_datasets_to_gdf(df, extents, year=2013, verbose=True)
         all_years_datasets[2013] = sat_imgs_datasets
@@ -113,7 +117,10 @@ def create_train_test_dataframes(savename, sat_data="pleiades", small_sample=Fal
     df["min_x"] = df.bounds["minx"]
     df["max_x"] = df.bounds["maxx"]
     df = build_dataset.split_train_test(df)
-    df = df[["link", "AREA", "var", "type", "geometry"] + [col for col in df.columns if "dataset" in col]]
+    df = df[
+        ["link", "AREA", "var", "type", "geometry"]
+        + [col for col in df.columns if "dataset" in col]
+    ]
 
     ### Train/Test
     list_of_datasets = []
@@ -123,13 +130,19 @@ def create_train_test_dataframes(savename, sat_data="pleiades", small_sample=Fal
     df_train = df[df["type"] == "train"].copy().reset_index(drop=True)
     assert df_train.shape[0] > 0, f"Empty train dataset!"
 
-    df_test.to_feather(rf"{path_dataout}/test_datasets/{savename}_test_dataframe.feather")
-    print(
-        "Se creó el archivo:", rf"{path_dataout}/test_datasets/{savename}_test_dataframe.feather"
+    df_test.to_feather(
+        rf"{path_dataout}/test_datasets/{savename}_test_dataframe.feather"
     )
-    df_train.to_feather(rf"{path_dataout}/train_datasets/{savename}_train_dataframe.feather")
     print(
-        "Se creó el archivo:", rf"{path_dataout}/train_datasets/{savename}_train_dataframe.feather"
+        "Se creó el archivo:",
+        rf"{path_dataout}/test_datasets/{savename}_test_dataframe.feather",
+    )
+    df_train.to_feather(
+        rf"{path_dataout}/train_datasets/{savename}_train_dataframe.feather"
+    )
+    print(
+        "Se creó el archivo:",
+        rf"{path_dataout}/train_datasets/{savename}_train_dataframe.feather",
     )
 
     return df_train, df_test, all_years_datasets
@@ -149,7 +162,7 @@ def create_datasets(
     save_examples=True,
 ):
     # Trying to replicate these good practices from here: https://cs230.stanford.edu/blog/datapipeline/#best-practices
-    
+
     # Based on: https://medium.com/@acordier/tf-data-dataset-generators-with-parallelization-the-easy-way-b5c5f7d2a18
     def get_data(i, df_subset, type="train", load=False):
         # Decoding from the EagerTensor object. Extracts the number/value from the tensor
@@ -158,13 +171,10 @@ def create_datasets(
 
         if load:
             df_train, df_test, sat_imgs_datasets = create_train_test_dataframes(
-                savename,
-                small_sample=False
+                savename, small_sample=False
             )
         year = random.choices(
-            population=list(all_years_datasets.keys()),
-            weights=[1],
-            k=1
+            population=list(all_years_datasets.keys()), weights=[1], k=1
         )[0]
         sat_img_dataset = all_years_datasets[year]
         # initialize iterators & params
@@ -179,8 +189,7 @@ def create_datasets(
         value = df_subset.iloc[i]["var"]
         link_dataset = sat_img_dataset[df_subset.iloc[i][f"dataset_{year}"]]
 
-        while (is_correct_type == False) & (iteration<=5):
-        
+        while (is_correct_type == False) & (iteration <= 5):
             # Generate the image
             image, boundaries = utils.stacked_image_from_census_tract(
                 dataset=link_dataset,
@@ -197,10 +206,12 @@ def create_datasets(
                     boundaries, wanted_type=type
                 )
 
-            iteration +=1
+            iteration += 1
 
-        if iteration>=5:
-            print(f"More than 5 interations for link {df_subset.iloc[i]['link']}, moving to next link...")
+        if iteration >= 5:
+            print(
+                f"More than 5 interations for link {df_subset.iloc[i]['link']}, moving to next link..."
+            )
             image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
             value = 0
             return image, value
@@ -256,7 +267,7 @@ def create_datasets(
     #     lambda img, value: (value == 0)
     # )  # Filter out links without image
     train_dataset = train_dataset.batch(32)
-    if sample_size>1:
+    if sample_size > 1:
         train_dataset = train_dataset.repeat(sample_size).prefetch(tf.data.AUTOTUNE)
     else:
         train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
@@ -272,22 +283,30 @@ def create_datasets(
         lambda i: tf.py_function(  # The actual data generator. Passes the index to the function that will process the data.
             func=get_test_data, inp=[i], Tout=[tf.uint8, tf.float32]
         ),
-        num_parallel_calls=1 # tf.data.experimental.AUTOTUNE,
+        num_parallel_calls=1,  # tf.data.experimental.AUTOTUNE,
     )
 
     test_dataset = test_dataset.batch(128).repeat(10)
-    
+
     if save_examples == True:
         i = 0
         print("saving train/test examples")
         for x in train_dataset.take(5):
-            np.save(f"{path_outputs}/{savename}_train_example_{i}_imgs", tfds.as_numpy(x)[0])
-            np.save(f"{path_outputs}/{savename}_train_example_{i}_labs", tfds.as_numpy(x)[1])
+            np.save(
+                f"{path_outputs}/{savename}_train_example_{i}_imgs", tfds.as_numpy(x)[0]
+            )
+            np.save(
+                f"{path_outputs}/{savename}_train_example_{i}_labs", tfds.as_numpy(x)[1]
+            )
             i += 1
         i = 0
         for x in test_dataset.take(5):
-            np.save(f"{path_outputs}/{savename}_test_example_{i}_imgs", tfds.as_numpy(x)[0])
-            np.save(f"{path_outputs}/{savename}_test_example_{i}_labs", tfds.as_numpy(x)[1])
+            np.save(
+                f"{path_outputs}/{savename}_test_example_{i}_imgs", tfds.as_numpy(x)[0]
+            )
+            np.save(
+                f"{path_outputs}/{savename}_test_example_{i}_labs", tfds.as_numpy(x)[1]
+            )
             i += 1
 
     print()
@@ -319,7 +338,6 @@ def get_callbacks(
             self.log_dir = log_dir
 
         def on_epoch_end(self, epoch, logs=None):
-
             # Save model
             os.makedirs(f"{path_dataout}/models_by_epoch/{savename}", exist_ok=True)
             self.model.save(
@@ -353,8 +371,10 @@ def get_callbacks(
         save_best_only=True,  # save the best model
         mode="auto",
         save_freq="epoch",  # save every epoch
-    ) 
-    csv_logger = CSVLogger(f"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv", append=True)
+    )
+    csv_logger = CSVLogger(
+        f"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv", append=True
+    )
 
     return [
         tensorboard_callback,
@@ -412,11 +432,11 @@ def run_model(
             os.makedirs(f"{path_dataout}/models_by_epoch/{savename}")
             print("Model not found, running from begining")
             initial_epoch = None
-                
+
         return initial_epoch
-    
+
     initial_epoch = get_last_trained_epoch(savename)
-    
+
     if initial_epoch is None:
         # constructs the model and compiles it
         model = model_function
@@ -434,10 +454,12 @@ def run_model(
 
         model.compile(optimizer="nadam", loss=loss, metrics=metrics)
         initial_epoch = 0
-        
+
     else:
         print("Restoring model...")
-        model_path = f"{path_dataout}/models_by_epoch/{savename}/{savename}_{initial_epoch}"
+        model_path = (
+            f"{path_dataout}/models_by_epoch/{savename}/{savename}_{initial_epoch}"
+        )
         model = keras.models.load_model(model_path)  # load the model from file
         initial_epoch = initial_epoch
 
@@ -450,7 +472,7 @@ def run_model(
         callbacks=callbacks,
         workers=2,  # adjust this according to the number of CPU cores of your machine
     )
-    
+
     # model.evaluate(
     #     test_dataset,
     #     callbacks=callbacks,
@@ -467,7 +489,7 @@ def plot_predictions_vs_real(df):
     la performance del modelo.
 
     """
-    
+
     # Resultado general
     slope, intercept, r, p_value, std_err = scipy.stats.linregress(
         df["real"], df["pred"]
@@ -577,85 +599,95 @@ def run(
         If you just want to check if the code is working, set small_sample to True, by default False
     """
     log_dir = f"{path_logs}/{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    if len(stacked_images)>1:
+    if len(stacked_images) > 1:
         savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}_stacked{extra}"
     else:
-        savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
+        savename = (
+            f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
+        )
 
-    ## Set Model & loss function
-    model, loss, metrics = set_model_and_loss_function(
-        model_name=model_name,
-        kind=kind,
-        bands=nbands * len(stacked_images),
-        resizing_size=resizing_size,
-        weights=weights,
-    )
+    # ## Set Model & loss function
+    # model, loss, metrics = set_model_and_loss_function(
+    #     model_name=model_name,
+    #     kind=kind,
+    #     bands=nbands * len(stacked_images),
+    #     resizing_size=resizing_size,
+    #     weights=weights,
+    # )
 
-    ### Create train and test dataframes from ICPAG
+    # ### Create train and test dataframes from ICPAG
     df_train, df_test, all_years_datasets = create_train_test_dataframes(
-        savename,
-        sat_data="landsat",
-        small_sample=small_sample
+        savename, sat_data="landsat", small_sample=small_sample
     )
 
-    ## Transform dataframes into datagenerators:
-    #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
-    print("Setting up data generators...")
-    train_dataset, test_dataset = create_datasets(
-        df_train=df_train,
-        df_test=df_test,
-        all_years_datasets=all_years_datasets,
-        image_size=image_size,
-        resizing_size=resizing_size,
-        nbands=nbands,
-        stacked_images=stacked_images,
-        tiles=tiles,
-        sample=sample_size,
-        savename=savename,
-        save_examples=True,
-    )
-    # Get tensorboard callbacks and set the custom test loss computation
-    #   at the end of each epoch
-    callbacks = get_callbacks(
-        savename=savename,
-        logdir=log_dir,
-    )
+    # ## Transform dataframes into datagenerators:
+    # #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
+    # print("Setting up data generators...")
+    # train_dataset, test_dataset = create_datasets(
+    #     df_train=df_train,
+    #     df_test=df_test,
+    #     all_years_datasets=all_years_datasets,
+    #     image_size=image_size,
+    #     resizing_size=resizing_size,
+    #     nbands=nbands,
+    #     stacked_images=stacked_images,
+    #     tiles=tiles,
+    #     sample=sample_size,
+    #     savename=savename,
+    #     save_examples=True,
+    # )
+    # # Get tensorboard callbacks and set the custom test loss computation
+    # #   at the end of each epoch
+    # callbacks = get_callbacks(
+    #     savename=savename,
+    #     logdir=log_dir,
+    # )
 
-    # Run model
-    model, history = run_model(
-        model_function=model,
-        lr=0.0001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
-        train_dataset=train_dataset,
-        test_dataset=test_dataset,
-        loss=loss,
-        metrics=metrics,
-        callbacks=callbacks,
-        epochs=n_epochs,
-        savename=savename,
-    )
-            
+    # # Run model
+    # model, history = run_model(
+    #     model_function=model,
+    #     lr=0.0001, # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
+    #     train_dataset=train_dataset,
+    #     test_dataset=test_dataset,
+    #     loss=loss,
+    #     metrics=metrics,
+    #     callbacks=callbacks,
+    #     epochs=n_epochs,
+    #     savename=savename,
+    # )
+
     # Compute metrics
-    hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
-    true_metrics.plot_results(
-        models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
-        savename=savename,
-        tiles=tiles,
-        size=image_size,
-        resizing_size=resizing_size,
-        n_epochs=hist_df.index.max(),
-        n_bands=nbands,
-        stacked_images=stacked_images,
-        generate=True,
-    )
+    # hist_df = pd.read_csv(fr"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv")
+    # true_metrics.plot_results(
+    #     models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
+    #     savename=savename,
+    #     tiles=tiles,
+    #     size=image_size,
+    #     resizing_size=resizing_size,
+    #     n_epochs=hist_df.index.max(),
+    #     n_bands=nbands,
+    #     stacked_images=stacked_images,
+    #     generate=True,
+    # )
 
     # Generate gridded predictions & plot examples
     for year in all_years_datasets.keys():
-        grid_preds, datasets, extents = grid_predictions.generate_grid(savename, image_size, resizing_size, nbands, stacked_images, year=year, generate=True)
-        grid_predictions.plot_all_examples(datasets, extents, grid_preds, savename, year)
+        grid_preds, datasets, extents = grid_predictions.generate_grid(
+            savename,
+            image_size,
+            resizing_size,
+            nbands,
+            stacked_images,
+            year=year,
+            generate=True,
+        )
+        grid_predictions.plot_all_examples(
+            datasets, extents, grid_preds, savename, year
+        )
 
 
 if __name__ == "__main__":
-    image_size = 32 # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
+    image_size = 32  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
     sample_size = 1
     resizing_size = 32
     tiles = 1
@@ -666,7 +698,7 @@ if __name__ == "__main__":
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
     extra = "_landsat"
     stacked_images = [1]
-    
+
     # Train the Model
     run(
         model_name=model,

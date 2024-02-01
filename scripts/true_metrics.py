@@ -87,7 +87,6 @@ def generate_gridded_images(
     # Filtro Radios demasiado grandes (tardan horas en generar la cuadrícula y es puro campo...)
     df_test = df_test[df_test["AREA"] <= 200000]  # Remove rc that are too big
     links = df_test["link"].unique()
-    len_links = len(links)
     valid_links = []
 
     # Loop por radio censal. Si está la imagen la usa, sino la genera.
@@ -249,9 +248,15 @@ def get_gridded_predictions_for_grid(
         return image
 
     # Open grid of polygons for the corresponding parameters:
-    grid = gpd.read_parquet(
-        rf"{path_datain}/Grillas/grid_size{size}_tiles1.parquet"
-    )
+    if size<128: # Working with landsat
+        grid = gpd.read_parquet(
+            rf"{path_datain}/Grillas/grid_size512_tiles1.parquet"
+        )
+    else:
+        grid = gpd.read_parquet(
+            rf"{path_datain}/Grillas/grid_size{size}_tiles1.parquet"
+        )
+    
     grid = restrict_grid_to_ICPAG_area(grid, icpag)
     grid = remove_sea_from_grid(grid)
     grid = build_dataset.assign_datasets_to_gdf(grid, extents, verbose=False)
@@ -639,7 +644,7 @@ def compute_custom_loss_all_epochs(
 
     # Load data
     print("Loading data...")
-    sat_img_datasets, extents = build_dataset.load_satellite_datasets()
+    sat_img_datasets, extents = build_dataset.load_landsat_datasets()
     df_test = gpd.read_feather(rf"{path_dataout}/test_datasets/{savename}_test_dataframe.feather")
     print("Data loaded!")
 
