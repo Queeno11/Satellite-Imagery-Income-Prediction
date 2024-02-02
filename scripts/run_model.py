@@ -39,6 +39,7 @@ import pandas as pd
 import xarray as xr
 from typing import Iterator, List, Union, Tuple, Any
 from datetime import datetime
+from sklearn.model_selection import train_test_split
 
 # Mute TF low_level warnings: https://stackoverflow.com/questions/76912213/tf2-13-local-rendezvous-recv-item-cancelled
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
@@ -89,6 +90,7 @@ def open_datasets(sat_data="pleiades", years=[2013, 2018, 2022]):
     print("Reading dataset...")
     df = build_dataset.load_icpag_dataset()
 
+    year_cols = []
     datasets_all_years = {}
     extents_all_years = {}
     for year in years:
@@ -102,7 +104,9 @@ def open_datasets(sat_data="pleiades", years=[2013, 2018, 2022]):
         df = build_dataset.assign_datasets_to_gdf(df, extents, year=year, verbose=True)
         datasets_all_years[year] = sat_imgs_datasets
         extents_all_years[year] = extents
-
+        year_cols += [f"dataset_{year}"]
+        
+    df = df[df[year_cols].notna().any(axis=1)]
     print("Datasets loaded!")
 
     return datasets_all_years, extents_all_years, df
@@ -155,7 +159,7 @@ def create_train_test_dataframes(df, savename, small_sample=False):
 
 
 def create_datasets(
-    df_train,
+    df_not_test,
     df_test,
     all_years_datasets,
     image_size,
@@ -170,7 +174,7 @@ def create_datasets(
     # Trying to replicate these good practices from here: https://cs230.stanford.edu/blog/datapipeline/#best-practices
 
     # Based on: https://medium.com/@acordier/tf-data-dataset-generators-with-parallelization-the-easy-way-b5c5f7d2a18
-    def get_data(i, df_subset, type="train", load=False):
+    def get_data(i, df_subset, data_type="train", load=False):
         # Decoding from the EagerTensor object. Extracts the number/value from the tensor
         #   example: <tf.Tensor: shape=(), dtype=uint8, numpy=20> -> 20
         i = i.numpy()
@@ -180,12 +184,13 @@ def create_datasets(
             weights=[1]
         elif len(years)==2:
             weights=[.8,.2]
-        elif len(years)==2:
+        elif len(years)==3:
             weights=[.8,.1,.1]
-            
-        year = random.choices(population=years, weights=weights, k=1)[0]
-        sat_img_dataset = all_years_datasets[year]
+        else: 
+            raise ValueError(f"years lenght ({len(years)}) is not a valid value. Must be from either one, two or three.")
+        
         # initialize iterators & params
+        
         iteration = 0
         is_correct_type = False
         image = np.zeros(shape=(nbands, 0, 0))
@@ -195,7 +200,15 @@ def create_datasets(
         # Get link, dataset and indicator value of the corresponding index
         polygon = df_subset.iloc[i]["geometry"]
         value = df_subset.iloc[i]["var"]
-        link_dataset = sat_img_dataset[df_subset.iloc[i][f"dataset_{year}"]]
+        
+        # Some links only have data for a certain year. Try randomly until get one correctly (at least 1 in 3 has to have data)
+        dataset_name = pd.NA
+        while pd.isna(dataset_name): 
+            year = random.choices(population=years, weights=weights, k=1)[0]
+            sat_img_dataset = all_years_datasets[year]
+            dataset_name = df_subset.iloc[i][f"dataset_{year}"]
+
+        link_dataset = sat_img_dataset[dataset_name]
 
         while (is_correct_type == False) & (iteration <= 5):
             # Generate the image
@@ -206,12 +219,12 @@ def create_datasets(
                 n_bands=nbands,
                 stacked_images=stacked_images,
             )
-
+            
             # (1) Image has to have the correct shape
             if image.shape == img_correct_shape:
                 # (2) Image has to fall in train or test side
                 is_correct_type = build_dataset.assert_train_test_datapoint(
-                    boundaries, wanted_type=type
+                    boundaries, wanted_type=data_type
                 )
 
             iteration += 1
@@ -236,21 +249,30 @@ def create_datasets(
         return image, value
 
     def get_train_data(i):
-        image, value = get_data(i, df_train, type="train")
+        image, value = get_data(i, df_train, data_type="train")
         return image, value
 
     def get_test_data(i):
-        image, value = get_data(i, df_test, type="test")
+        image, value = get_data(i, df_test, data_type="test")
         return image, value
 
     print()
     print("Benchmarking MSE against the mean")
-    print(f"Train MSE: {df_train['var'].var()}")
+    print(f"Train MSE: {df_not_test['var'].var()}")
     print(f"Test MSE: {df_test['var'].var()}")
 
     print(f"Sample size: {sample}")
 
     ### Generate Datasets
+    # Split the data
+    df_val=df_not_test.sample(frac=0.1,random_state=200)
+    df_train=df_not_test.drop(df_val.index)
+    df_val = df_val.reset_index()
+    df_train = df_train.reset_index()
+    print()
+    print(f"Train size: {len(df_train)} ({round(len(df_train)/len(df_not_test)*100,2)}%)")
+    print(f"Validation size: {len(df_val)} ({round(len(df_val)/len(df_not_test)*100,2)}%)")
+    
     ## TRAIN ##
     # Generator for the index
     train_dataset = tf.data.Dataset.from_generator(
@@ -270,15 +292,29 @@ def create_datasets(
         ),
     )
 
-    # FIXME: debería agregar esto...
-    # train_dataset = train_dataset.filter(
-    #     lambda img, value: (value == 0)
-    # )  # Filter out links without image
     train_dataset = train_dataset.batch(32)
     if sample_size > 1:
         train_dataset = train_dataset.repeat(sample_size).prefetch(tf.data.AUTOTUNE)
     else:
         train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
+
+    ## VAL ##
+    # Generator for the index
+    val_dataset = tf.data.Dataset.from_generator(
+        lambda: list(range(df_val.shape[0])),  # The index generator,
+        tf.uint32,
+    )  # Creates a dataset with only the indexes (0, 1, 2, 3, etc.)
+    val_dataset = val_dataset.shuffle(
+        buffer_size=int(df_val.shape[0]),
+        seed=825,
+        reshuffle_each_iteration=True,
+    )
+    val_dataset = val_dataset.map(
+        lambda i: tf.py_function(  # The actual data generator. Passes the index to the function that will process the data.
+            func=get_test_data, inp=[i], Tout=[tf.uint8, tf.float32]
+        ),
+    )
+    val_dataset = val_dataset.batch(128).repeat(5)
 
     ## TEST ##
     # Generator for the index
@@ -294,7 +330,7 @@ def create_datasets(
         num_parallel_calls=1,  # tf.data.experimental.AUTOTUNE,
     )
 
-    test_dataset = test_dataset.batch(128).repeat(10)
+    test_dataset = test_dataset.batch(128).repeat(5)
 
     if save_examples == True:
         i = 0
@@ -320,7 +356,7 @@ def create_datasets(
     print()
     print("Dataset generado!")
 
-    return train_dataset, test_dataset
+    return train_dataset, val_dataset, test_dataset
 
 
 def get_callbacks(
@@ -364,7 +400,8 @@ def get_callbacks(
     early_stopping_callback = EarlyStopping(
         monitor="val_loss",
         min_delta=0,  # the training is terminated as soon as the performance measure gets worse from one epoch to the next
-        patience=200,  # amount of epochs with no improvements until the model stops
+        start_from_epoch=150,
+        patience=25,  # amount of epochs with no improvements until the model stops
         verbose=2,
         mode="auto",  # the model is stopped when the quantity monitored has stopped decreasing
         restore_best_weights=True,  # restore the best model with the lowest validation error
@@ -387,7 +424,7 @@ def get_callbacks(
     return [
         tensorboard_callback,
         # reduce_lr,
-        # early_stopping_callback,
+        early_stopping_callback,
         model_checkpoint_callback,
         csv_logger,
         custom_loss_callback,
@@ -398,7 +435,7 @@ def run_model(
     model_function: Model,
     lr: float,
     train_dataset: Iterator,
-    test_dataset: Iterator,
+    val_dataset: Iterator,
     loss: str,
     epochs: int,
     metrics: List[str],
@@ -471,20 +508,17 @@ def run_model(
         model = keras.models.load_model(model_path)  # load the model from file
         initial_epoch = initial_epoch
 
+    
     history = model.fit(
         train_dataset,
-        epochs=epochs,
+        epochs=1000,
         # steps_per_epoch=8545 * sample_size / 32,
         initial_epoch=initial_epoch,
-        validation_data=test_dataset,
+        validation_data=val_dataset,
         callbacks=callbacks,
         workers=2,  # adjust this according to the number of CPU cores of your machine
     )
 
-    # model.evaluate(
-    #     test_dataset,
-    #     callbacks=callbacks,
-    # )
     return model, history  # type: ignore
 
 
@@ -630,15 +664,15 @@ def run(
     )
 
     # ### Create train and test dataframes from ICPAG
-    df_train, df_test = create_train_test_dataframes(
+    df_not_test, df_test = create_train_test_dataframes(
         df, savename, small_sample=small_sample
     )
 
     ## Transform dataframes into datagenerators:
     #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
     print("Setting up data generators...")
-    train_dataset, test_dataset = create_datasets(
-        df_train=df_train,
+    train_dataset, val_dataset, test_dataset = create_datasets(
+        df_not_test=df_not_test,
         df_test=df_test,
         all_years_datasets=all_years_datasets,
         image_size=image_size,
@@ -662,7 +696,7 @@ def run(
         model_function=model,
         lr=0.0001,  # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
         train_dataset=train_dataset,
-        test_dataset=test_dataset,
+        val_dataset=val_dataset,
         loss=loss,
         metrics=metrics,
         callbacks=callbacks,
@@ -674,7 +708,7 @@ def run(
     hist_df = pd.read_csv(
         rf"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv"
     )
-    true_metrics.plot_results(
+    true_metrics.plot_results( # No entra el test_dataset acá pero despues usa el df_test guardado en memoria
         models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
         savename=savename,
         datasets=all_years_datasets[2013],
@@ -715,10 +749,10 @@ if __name__ == "__main__":
     kind = "reg"
     model = "mobnet_v3_large"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = "_test"
+    extra = "_all_years"
     stacked_images = [1]
     sat_data = "pleiades"
-    years = [2013, 2018]
+    years = [2013, 2018, 2022]
     nbands = 4
     # Train the Model
     run(
@@ -732,7 +766,7 @@ if __name__ == "__main__":
         nbands=nbands,
         tiles=tiles,
         stacked_images=stacked_images,
-        n_epochs=3,
+        n_epochs=500,
         sat_data=sat_data,
         years=years,
         extra=extra,

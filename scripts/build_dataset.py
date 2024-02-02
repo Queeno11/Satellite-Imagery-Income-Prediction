@@ -43,7 +43,7 @@ def load_satellite_datasets(year=2013, stretch=False):
     """Load satellite datasets and get their extents"""
     
     if not os.path.isdir(rf"{path_satelites}/{year}"):
-        raise ValueError(f"Year {year} images not found.")
+        raise ValueError(f"Year {year} images not found. Check they are stored in WSL!")
     
     files = os.listdir(rf"{path_satelites}/{year}")
     files = [f for f in files if f.endswith(".tif")]
@@ -147,11 +147,11 @@ def assign_datasets_to_gdf(gdf, extents, year=2013, centroid=False, verbose=True
             gdf.loc[gdf.within(bbox), colname] = name
  
     nan_links = gdf[colname].isna().sum()
-    gdf = gdf[gdf[colname].notna()]
+    # gdf = gdf[gdf[colname].notna()]
 
     if verbose:
-        print("Links without images:", nan_links, "out of", len(gdf)+nan_links)
-        print("Remaining links for train/test:", len(gdf))
+        print(f"Links without images ({year}):", nan_links, "out of", len(gdf)+nan_links)
+        print(f"Remaining links for train/test ({year}):", len(gdf))
         gdf.plot()
         plt.savefig(rf"{path_dataout}/links_with_images.png")
 
