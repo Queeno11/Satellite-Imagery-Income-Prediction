@@ -741,19 +741,27 @@ def run(
 
 if __name__ == "__main__":
     image_size = 128  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    sample_size = 1
     resizing_size = 128
+    sample_size = 1
     tiles = 1
+    stacked_images = [1]   
 
     variable = "ln_pred_inc_mean"
     kind = "reg"
     model = "mobnet_v3_large"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
     extra = "_all_years"
-    stacked_images = [1]
     sat_data = "pleiades"
-    years = [2013, 2018, 2022]
-    nbands = 4
+    
+    if sat_data=="pleiades":
+        years = [2013, 2018, 2022]
+        nbands = 4
+    elif sat_data=="landsat":
+        years = [2013]
+        nbands = 10
+        image_data = 32
+        resizing_size = 32
+
     # Train the Model
     run(
         model_name=model,
