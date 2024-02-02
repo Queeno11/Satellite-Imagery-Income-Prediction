@@ -42,36 +42,36 @@ images = os.listdir(path_in)
 images = [img for img in images if img.endswith(".tif")]
 
 ## Compute percentiles over all the images
-images_sample_data = {}
-for image in images:
-    # Load array
-    rasterArray = gdal_array.LoadFile(
-        f"{path_in}\{image}"
-    )  # Read raster as numpy array
+# images_sample_data = {}
+# for image in images:
+#     # Load array
+#     rasterArray = gdal_array.LoadFile(
+#         f"{path_in}\{image}"
+#     )  # Read raster as numpy array
 
-    # Get percentile values for the input image
-    images_sample_data[image] = get_sample_array(f"{path_in}\{image}")
+#     # Get percentile values for the input image
+#     images_sample_data[image] = get_sample_array(f"{path_in}\{image}")
 
-bands_percentiles = {}
-q = 2
-for band in range(4):
-    band_data = np.concatenate(
-        [data[band] for name, data in images_sample_data.items()]
-    )
-    bands_percentiles[band] = (
-        np.percentile(band_data, q),
-        np.percentile(band_data, 100 - q),
-    )
+# bands_percentiles = {}
+# q = 2
+# for band in range(4):
+#     band_data = np.concatenate(
+#         [data[band] for name, data in images_sample_data.items()]
+#     )
+#     bands_percentiles[band] = (
+#         np.percentile(band_data, q),
+#         np.percentile(band_data, 100 - q),
+#     )
 
-# Construct the -scale options
-scale_options = " ".join(
-    [
-        f"-scale_{i+1} {min_val} {max_val}"
-        for i, (min_val, max_val) in bands_percentiles.items()
-    ]
-)
-with open(f"{path_in}/scale_options.txt", "w") as text_file:
-    text_file.write(scale_options)
+# # Construct the -scale options
+# scale_options = " ".join(
+#     [
+#         f"-scale_{i+1} {min_val} {max_val}"
+#         for i, (min_val, max_val) in bands_percentiles.items()
+#     ]
+# )
+# with open(f"{path_in}/scale_options.txt", "w") as text _file:
+#     text_file.write(scale_options)
 
 ## Read scale options (previous line might take a lot of time)
 with open(rf"{path_in}/scale_options.txt", "r") as text_file:
@@ -112,8 +112,6 @@ for image in images:
             "OUTPUT": file_out,
         },
     )
-    QgsProject.instance().removeMapLayer(layer.id())
     assert os.path.isfile(file_out)
-    os.remove(file_in)
     print(f"{file_out} created. {n_imgs-i} images remains.")
     i += 1

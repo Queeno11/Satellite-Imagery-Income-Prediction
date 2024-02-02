@@ -50,6 +50,7 @@ for sat_capture in sat_captures:
         out = rf"E:\2022 imagenes\{out}"
         if os.path.isfile(out):
             continue
+            
         # Step 1: Extract NIR band using gdal:translate
         result_extract_nir = processing.run(
             "gdal:translate",
