@@ -401,7 +401,7 @@ def get_callbacks(
         monitor="val_loss",
         min_delta=0,  # the training is terminated as soon as the performance measure gets worse from one epoch to the next
         start_from_epoch=150,
-        patience=25,  # amount of epochs with no improvements until the model stops
+        patience=50,  # amount of epochs with no improvements until the model stops
         verbose=2,
         mode="auto",  # the model is stopped when the quantity monitored has stopped decreasing
         restore_best_weights=True,  # restore the best model with the lowest validation error
@@ -692,34 +692,34 @@ def run(
     )
 
     # Run model
-    model, history = run_model(
-        model_function=model,
-        lr=0.0001,  # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
-        train_dataset=train_dataset,
-        val_dataset=val_dataset,
-        loss=loss,
-        metrics=metrics,
-        callbacks=callbacks,
-        epochs=n_epochs,
-        savename=savename,
-    )
+    # model, history = run_model(
+    #     model_function=model,
+    #     lr=0.0001,  # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
+    #     train_dataset=train_dataset,
+    #     val_dataset=val_dataset,
+    #     loss=loss,
+    #     metrics=metrics,
+    #     callbacks=callbacks,
+    #     epochs=n_epochs,
+    #     savename=savename,
+    # )
 
     # Compute metrics
-    hist_df = pd.read_csv(
-        rf"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv"
-    )
-    true_metrics.plot_results( # No entra el test_dataset acá pero despues usa el df_test guardado en memoria
-        models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
-        savename=savename,
-        datasets=all_years_datasets[2013],
-        tiles=tiles,
-        size=image_size,
-        resizing_size=resizing_size,
-        n_epochs=hist_df.index.max(),
-        n_bands=nbands,
-        stacked_images=stacked_images,
-        generate=True,
-    )
+    # hist_df = pd.read_csv(
+    #     rf"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv"
+    # )
+    # true_metrics.plot_results( # No entra el test_dataset acá pero despues usa el df_test guardado en memoria
+    #     models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
+    #     savename=savename,
+    #     datasets=all_years_datasets[2013],
+    #     tiles=tiles,
+    #     size=image_size,
+    #     resizing_size=resizing_size,
+    #     n_epochs=hist_df.index.max(),
+    #     n_bands=nbands,
+    #     stacked_images=stacked_images,
+    #     generate=True,
+    # )
 
     # Generate gridded predictions & plot examples
     for year in all_years_datasets.keys():
@@ -742,7 +742,7 @@ def run(
 if __name__ == "__main__":
     image_size = 128  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
     resizing_size = 128
-    sample_size = 1
+    sample_size = 5
     tiles = 1
     stacked_images = [1]   
 
@@ -774,7 +774,7 @@ if __name__ == "__main__":
         nbands=nbands,
         tiles=tiles,
         stacked_images=stacked_images,
-        n_epochs=500,
+        n_epochs=1000,
         sat_data=sat_data,
         years=years,
         extra=extra,

@@ -95,9 +95,13 @@ def generate_gridded_images(
         # print(f"{link}: {n}/{len_links}")
         # Genera la imagen
         file = rf"{test_folder}/test_{link}.npy"
+            
         link_dataset = build_dataset.get_dataset_for_gdf(
             df_test, sat_img_datasets, link, year=year
         )
+        if link_dataset is None:
+            continue
+        
         images, points, bounds = build_dataset.get_gridded_images_for_link(
             link_dataset,
             df_test,
@@ -222,6 +226,9 @@ def get_gridded_predictions_for_grid(
         link_name = radio_censal["link"].values[0]
 
         cell_dataset = build_dataset.get_dataset_for_gdf(grid, datasets, id_point, id_var="id")
+        if cell_dataset is None:
+            image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
+            return image
 
         while (image.shape != img_correct_shape) & (iteration<=5):
         
