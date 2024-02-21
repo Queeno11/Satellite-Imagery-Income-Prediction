@@ -17,6 +17,7 @@ from tensorflow.keras.applications import (
     EfficientNetB0,
     EfficientNetV2B3,
     EfficientNetV2S,
+    EfficientNetV2M,
     EfficientNetV2L,
     ResNet152V2,
 )
@@ -63,83 +64,13 @@ def mobnet_v3_large(resizing_size, bands=8, kind="reg", weights=None) -> Sequent
     return model
 
 
-def xception(resizing_size, kind="reg", weights=None) -> Sequential:
-    """https://keras.io/api/applications/xception/#xception-function"""
-
-    model_base = Xception(
-        include_top=False,
-        input_shape=(resizing_size, resizing_size, 4),
-        weights=weights,
-        include_preprocessing=True,
-    )
-    if weights is not None:
-        model_base.trainable = False
-
-    model = rebuild_top(model_base, kind=kind)
-    return model
-
-
-def resnet152_v2(kind="reg", weights=None) -> Sequential:
-    """https://keras.io/api/applications/resnet/#resnet152v2-function"""
-
-    model_base = ResNet152V2(
-        include_top=False,
-        input_shape=(224, 224, 3),
-        weights=weights,
-    )
-    if weights is not None:
-        model_base.trainable = False
-
-    model = rebuild_top(model_base, kind=kind)
-
-    # Add preprocessing layer
-    preprocess = layers.Lambda(keras.applications.resnet_v2.preprocess_input)
-    model = Sequential([preprocess, model])
-    model.build()
-
-    return model
-
-
-def effnet_b0(kind="reg", weights=None) -> Sequential:
-    """https://keras.io/api/applications/efficientnet_v2/#efficientnetv2s-function"""
-
-    model_base = EfficientNetB0(
-        include_top=False,
-        input_shape=(200, 200, 3),
-        weights=weights,
-        include_preprocessing=True,
-    )
-    if weights is not None:
-        model_base.trainable = False
-
-    model = rebuild_top(model_base, kind=kind)
-    return model
-
-
-def effnet_v2_b2(kind="reg", weights=None) -> Sequential:
-    """https://keras.io/api/applications/efficientnet_v2/#efficientnetv2s-function"""
-
-    model_base = EfficientNetV2B3(
-        include_top=False,
-        input_shape=(224, 224, 3),
-        weights=weights,
-        include_preprocessing=True,
-    )
-    if weights is not None:
-        model_base.trainable = False
-
-    model = rebuild_top(model_base, kind=kind)
-    return model
-
-
-def effnet_v2_s(kind="reg", weights=None) -> Sequential:
-    """https://keras.io/api/applications/efficientnet_v2/#efficientnetv2s-function"""
+def efficientnet_v2S(resizing_size, bands=8, kind="reg", weights=None) -> Sequential:
 
     model_base = EfficientNetV2S(
         include_top=False,
-        input_shape=(128, 128, 3),
+        input_shape=(resizing_size, resizing_size, bands),
         weights=weights,
-        include_preprocessing=True,
+        include_preprocessing=False,
     )
     if weights is not None:
         model_base.trainable = False
@@ -147,15 +78,27 @@ def effnet_v2_s(kind="reg", weights=None) -> Sequential:
     model = rebuild_top(model_base, kind=kind)
     return model
 
+def efficientnet_v2M(resizing_size, bands=8, kind="reg", weights=None) -> Sequential:
 
-def effnet_v2_l(kind="reg", weights=None) -> Sequential:
-    """https://keras.io/api/applications/efficientnet_v2/#efficientnetv2s-function"""
+    model_base = EfficientNetV2M(
+        include_top=False,
+        input_shape=(resizing_size, resizing_size, bands),
+        weights=weights,
+        include_preprocessing=False,
+    )
+    if weights is not None:
+        model_base.trainable = False
+
+    model = rebuild_top(model_base, kind=kind)
+    return model
+
+def efficientnet_v2L(resizing_size, bands=8, kind="reg", weights=None) -> Sequential:
 
     model_base = EfficientNetV2L(
         include_top=False,
-        input_shape=(224, 224, 3),
+        input_shape=(resizing_size, resizing_size, bands),
         weights=weights,
-        include_preprocessing=True,
+        include_preprocessing=False,
     )
     if weights is not None:
         model_base.trainable = False
