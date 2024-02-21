@@ -79,6 +79,18 @@ def enablePrint():
     sys.stdout = sys.__stdout__
 
 
+def generate_savename(
+    model_name, image_size, tiles, sample_size, extra, stacked_images
+):
+    if len(stacked_images) > 1:
+        savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}_stacked{extra}"
+    else:
+        savename = (
+            f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
+        )
+    return savename
+
+
 def open_datasets(sat_data="pleiades", years=[2013, 2018, 2022]):
     sat_options = ["pleiades", "landsat"]
     if sat_data not in sat_options:
@@ -105,7 +117,7 @@ def open_datasets(sat_data="pleiades", years=[2013, 2018, 2022]):
         datasets_all_years[year] = sat_imgs_datasets
         extents_all_years[year] = extents
         year_cols += [f"dataset_{year}"]
-        
+
     df = df[df[year_cols].notna().any(axis=1)]
     print("Datasets loaded!")
 
@@ -180,17 +192,19 @@ def create_datasets(
         i = i.numpy()
 
         years = list(all_years_datasets.keys())
-        if len(years)==1:
-            weights=[1]
-        elif len(years)==2:
-            weights=[.8,.2]
-        elif len(years)==3:
-            weights=[.8,.1,.1]
-        else: 
-            raise ValueError(f"years lenght ({len(years)}) is not a valid value. Must be from either one, two or three.")
-        
+        if len(years) == 1:
+            weights = [1]
+        elif len(years) == 2:
+            weights = [0.8, 0.2]
+        elif len(years) == 3:
+            weights = [1 / 3, 1 / 3, 1 / 3]
+        else:
+            raise ValueError(
+                f"years lenght ({len(years)}) is not a valid value. Must be from either one, two or three."
+            )
+
         # initialize iterators & params
-        
+
         iteration = 0
         is_correct_type = False
         image = np.zeros(shape=(nbands, 0, 0))
@@ -200,10 +214,10 @@ def create_datasets(
         # Get link, dataset and indicator value of the corresponding index
         polygon = df_subset.iloc[i]["geometry"]
         value = df_subset.iloc[i]["var"]
-        
+
         # Some links only have data for a certain year. Try randomly until get one correctly (at least 1 in 3 has to have data)
         dataset_name = pd.NA
-        while pd.isna(dataset_name): 
+        while pd.isna(dataset_name):
             year = random.choices(population=years, weights=weights, k=1)[0]
             sat_img_dataset = all_years_datasets[year]
             dataset_name = df_subset.iloc[i][f"dataset_{year}"]
@@ -219,7 +233,7 @@ def create_datasets(
                 n_bands=nbands,
                 stacked_images=stacked_images,
             )
-            
+
             # (1) Image has to have the correct shape
             if image.shape == img_correct_shape:
                 # (2) Image has to fall in train or test side
@@ -265,14 +279,18 @@ def create_datasets(
 
     ### Generate Datasets
     # Split the data
-    df_val=df_not_test.sample(frac=0.1,random_state=200)
-    df_train=df_not_test.drop(df_val.index)
+    df_val = df_not_test.sample(frac=0.066667, random_state=200)
+    df_train = df_not_test.drop(df_val.index)
     df_val = df_val.reset_index()
     df_train = df_train.reset_index()
     print()
-    print(f"Train size: {len(df_train)} ({round(len(df_train)/len(df_not_test)*100,2)}%)")
-    print(f"Validation size: {len(df_val)} ({round(len(df_val)/len(df_not_test)*100,2)}%)")
-    
+    print(
+        f"Train size: {len(df_train)} ({round(len(df_train)/len(df_not_test)*100,2)}%)"
+    )
+    print(
+        f"Validation size: {len(df_val)} ({round(len(df_val)/len(df_not_test)*100,2)}%)"
+    )
+
     ## TRAIN ##
     # Generator for the index
     train_dataset = tf.data.Dataset.from_generator(
@@ -292,7 +310,7 @@ def create_datasets(
         ),
     )
 
-    train_dataset = train_dataset.batch(32)
+    train_dataset = train_dataset.batch(16)
     if sample_size > 1:
         train_dataset = train_dataset.repeat(sample_size).prefetch(tf.data.AUTOTUNE)
     else:
@@ -400,8 +418,8 @@ def get_callbacks(
     early_stopping_callback = EarlyStopping(
         monitor="val_loss",
         min_delta=0,  # the training is terminated as soon as the performance measure gets worse from one epoch to the next
-        start_from_epoch=150,
-        patience=25,  # amount of epochs with no improvements until the model stops
+        start_from_epoch=50,
+        patience=50,  # amount of epochs with no improvements until the model stops
         verbose=2,
         mode="auto",  # the model is stopped when the quantity monitored has stopped decreasing
         restore_best_weights=True,  # restore the best model with the lowest validation error
@@ -424,7 +442,7 @@ def get_callbacks(
     return [
         tensorboard_callback,
         # reduce_lr,
-        early_stopping_callback,
+        # early_stopping_callback,
         model_checkpoint_callback,
         csv_logger,
         custom_loss_callback,
@@ -502,16 +520,22 @@ def run_model(
 
     else:
         print("Restoring model...")
-        model_path = (
-            f"{path_dataout}/models_by_epoch/{savename}/{savename}_{initial_epoch}"
-        )
-        model = keras.models.load_model(model_path)  # load the model from file
-        initial_epoch = initial_epoch
+        try:
+            model_path = (
+                f"{path_dataout}/models_by_epoch/{savename}/{savename}_{initial_epoch}"
+            )
+            model = keras.models.load_model(model_path)  # load the model from file
+        except:
+            initial_epoch -= 1
+            model_path = (
+                f"{path_dataout}/models_by_epoch/{savename}/{savename}_{initial_epoch}"
+            )
+            model = keras.models.load_model(model_path)  # load the model from file
+        initial_epoch = initial_epoch + 1
 
-    
     history = model.fit(
         train_dataset,
-        epochs=1000,
+        epochs=epochs,
         # steps_per_epoch=8545 * sample_size / 32,
         initial_epoch=initial_epoch,
         validation_data=val_dataset,
@@ -580,11 +604,15 @@ def set_model_and_loss_function(
         "mobnet_v3_large": custom_models.mobnet_v3_large(
             resizing_size, bands=bands, kind=kind, weights=weights
         ),
-        # "resnet152_v2": custom_models.resnet152_v2(kind=kind, weights=weights),
-        "effnet_v2_b2": custom_models.effnet_v2_b2(kind=kind, weights=weights),
-        "effnet_v2_s": custom_models.effnet_v2_s(kind=kind, weights=weights),
-        "effnet_v2_l": custom_models.effnet_v2_l(kind=kind, weights=weights),
-        # "effnet_b0": custom_models.effnet_b0(kind=kind, weights=weights),
+        "effnet_v2S": custom_models.efficientnet_v2S(
+            resizing_size, bands=bands, kind=kind, weights=weights
+        ),
+        "effnet_v2M": custom_models.efficientnet_v2M(
+            resizing_size, bands=bands, kind=kind, weights=weights
+        ),
+        "effnet_v2L": custom_models.efficientnet_v2L(
+            resizing_size, bands=bands, kind=kind, weights=weights
+        ),
     }
 
     # Validación de parámetros
@@ -643,12 +671,10 @@ def run(
         If you just want to check if the code is working, set small_sample to True, by default False
     """
     log_dir = f"{path_logs}/{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    if len(stacked_images) > 1:
-        savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}_stacked{extra}"
-    else:
-        savename = (
-            f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
-        )
+
+    savename = generate_savename(
+        model_name, image_size, tiles, sample_size, extra, stacked_images
+    )
 
     ## Set Model & loss function
     model, loss, metrics = set_model_and_loss_function(
@@ -694,7 +720,7 @@ def run(
     # Run model
     model, history = run_model(
         model_function=model,
-        lr=0.0001,  # 0.001 dio cualquier cosa. ## lr=0.00009 para mobnet_v3_20230823-141458
+        lr=0.0001,
         train_dataset=train_dataset,
         val_dataset=val_dataset,
         loss=loss,
@@ -703,12 +729,14 @@ def run(
         epochs=n_epochs,
         savename=savename,
     )
+    print("Fin del entrenamiento")
+    # raise SystemExit
 
     # Compute metrics
     hist_df = pd.read_csv(
         rf"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv"
     )
-    true_metrics.plot_results( # No entra el test_dataset acá pero despues usa el df_test guardado en memoria
+    true_metrics.plot_results(  # No entra el test_dataset acá pero despues usa el df_test guardado en memoria
         models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
         savename=savename,
         datasets=all_years_datasets[2013],
@@ -740,23 +768,23 @@ def run(
 
 
 if __name__ == "__main__":
-    image_size = 128  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
+    image_size = 256  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
     resizing_size = 128
-    sample_size = 1
+    sample_size = 5
     tiles = 1
-    stacked_images = [1]   
+    stacked_images = [1]
 
     variable = "ln_pred_inc_mean"
     kind = "reg"
-    model = "mobnet_v3_large"
+    model = "effnet_v2L"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = "_all_years"
+    extra = ""
     sat_data = "pleiades"
-    
-    if sat_data=="pleiades":
+
+    if sat_data == "pleiades":
         years = [2013, 2018, 2022]
         nbands = 4
-    elif sat_data=="landsat":
+    elif sat_data == "landsat":
         years = [2013]
         nbands = 10
         image_data = 32
@@ -774,7 +802,7 @@ if __name__ == "__main__":
         nbands=nbands,
         tiles=tiles,
         stacked_images=stacked_images,
-        n_epochs=500,
+        n_epochs=200,
         sat_data=sat_data,
         years=years,
         extra=extra,

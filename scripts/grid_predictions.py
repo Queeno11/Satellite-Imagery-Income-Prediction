@@ -197,10 +197,10 @@ def plot_grid(grid_preds, modelname, year=2013):
 
     fig, axs = plt.subplots(1, 2, figsize=(10, 5))
 
-    gdf_plot_example(grid_preds, var="prediction", poly=poly, ax=axs[0], alpha=1)#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
-    axs[0].set_title("Ingreso predicho por imagenes satelitales")
-    gdf_plot_example(icpag, var="var", poly=poly, ax=axs[1], alpha=1)#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
+    bins = gdf_plot_example(icpag, var="var", poly=poly, ax=axs[1], alpha=1)#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
     axs[1].set_title("Ingreso estructural por small area")
+    gdf_plot_example(grid_preds, var="prediction", poly=poly, ax=axs[0], bins=bins, alpha=1)#, vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
+    axs[0].set_title("Ingreso predicho por imagenes satelitales")
     fig.tight_layout()
     
     savepath = f"{path_outputs}/{modelname}"

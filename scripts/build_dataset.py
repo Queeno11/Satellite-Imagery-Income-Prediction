@@ -292,6 +292,12 @@ def get_dataset_for_gdf(icpag, datasets, link, year=2013, id_var="link"):
     - current_ds: xarray.Dataset, dataset where the census tract is located
     """
     current_ds_name = icpag.loc[icpag[id_var] == link, f"dataset_{year}"].values[0]
+    
+    if pd.isna(current_ds_name):
+        # No dataset for this census tract this year...
+        current_ds = None
+        return current_ds 
+    
     current_ds = datasets[current_ds_name]
     return current_ds
 

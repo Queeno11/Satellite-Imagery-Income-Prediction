@@ -329,6 +329,7 @@ def augment_image(img):
     )  # Random number between 0.4 and 2.5 (same level of contrast)
     img = skimage.exposure.adjust_gamma(img, gamma=rand_gamma)
 
+    # FIXME: agregar saturation
     # Rescale intensity
     rand_min = np.random.randint(0, 5) / 10  # Random number between 0 and 0.5
     rand_max = np.random.randint(0, 5) / 10  # Random number between 0 and 0.5
