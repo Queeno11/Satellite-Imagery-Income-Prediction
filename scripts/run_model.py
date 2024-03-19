@@ -33,10 +33,12 @@ import utils
 
 import os
 import sys
+import json
 import scipy
 import random
 import pandas as pd
 import xarray as xr
+import warnings
 from typing import Iterator, List, Union, Tuple, Any
 from datetime import datetime
 from sklearn.model_selection import train_test_split
@@ -80,23 +82,22 @@ def enablePrint():
 
 
 def generate_savename(
-    model_name, image_size, tiles, sample_size, extra, stacked_images
+    model_name, image_size, learning_rate, stacked_images, years, extra
 ):
+    years_str = "-".join(map(str, years))
+    print(stacked_images)
     if len(stacked_images) > 1:
-        savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}_stacked{extra}"
+        stacked_str = "-".join(map(str, stacked_images))
+        savename = f"{model_name}_lr{learning_rate}_size{image_size}_y{years_str}_stack{stacked_str}{extra}"
     else:
         savename = (
-            f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
+            f"{model_name}_lr{learning_rate}_size{image_size}_y{years_str}_{extra}"
         )
+
     return savename
 
 
 def open_datasets(sat_data="pleiades", years=[2013, 2018, 2022]):
-    sat_options = ["pleiades", "landsat"]
-    if sat_data not in sat_options:
-        raise ValueError("Invalid sat_data type. Expected one of: %s" % sat_options)
-    if len(years) > 1 and sat_data == "landsat":
-        raise ValueError("Landsat data only available in 2013.")
 
     ### Open dataframe with files and labels
     print("Reading dataset...")
@@ -279,8 +280,10 @@ def create_datasets(
 
     ### Generate Datasets
     # Split the data
-    df_val = df_not_test.sample(frac=0.066667, random_state=200)
-    df_train = df_not_test.drop(df_val.index)
+    df_val = df_test
+    df_train = df_not_test
+    # df_val = df_not_test.sample(frac=0.066667, random_state=200)
+    # df_train = df_not_test.drop(df_val.index)
     df_val = df_val.reset_index()
     df_train = df_train.reset_index()
     print()
@@ -311,8 +314,8 @@ def create_datasets(
     )
 
     train_dataset = train_dataset.batch(64)
-    if sample_size > 1:
-        train_dataset = train_dataset.repeat(sample_size).prefetch(tf.data.AUTOTUNE)
+    if sample > 1:
+        train_dataset = train_dataset.repeat(sample).prefetch(tf.data.AUTOTUNE)
     else:
         train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
 
@@ -351,23 +354,31 @@ def create_datasets(
     test_dataset = test_dataset.batch(128).repeat(5)
 
     if save_examples == True:
-        i = 0
+
         print("saving train/test examples")
+        os.makedirs(f"{path_outputs}/{savename}/examples", exist_ok=True)
+
+        i = 0
         for x in train_dataset.take(5):
             np.save(
-                f"{path_outputs}/{savename}_train_example_{i}_imgs", tfds.as_numpy(x)[0]
+                f"{path_outputs}/{savename}/examples/{savename}_train_example_{i}_imgs",
+                tfds.as_numpy(x)[0],
             )
             np.save(
-                f"{path_outputs}/{savename}_train_example_{i}_labs", tfds.as_numpy(x)[1]
+                f"{path_outputs}/{savename}/examples/{savename}_train_example_{i}_labs",
+                tfds.as_numpy(x)[1],
             )
             i += 1
+
         i = 0
         for x in test_dataset.take(5):
             np.save(
-                f"{path_outputs}/{savename}_test_example_{i}_imgs", tfds.as_numpy(x)[0]
+                f"{path_outputs}/{savename}/examples/{savename}_test_example_{i}_imgs",
+                tfds.as_numpy(x)[0],
             )
             np.save(
-                f"{path_outputs}/{savename}_test_example_{i}_labs", tfds.as_numpy(x)[1]
+                f"{path_outputs}/{savename}/examples/{savename}_test_example_{i}_labs",
+                tfds.as_numpy(x)[1],
             )
             i += 1
 
@@ -507,15 +518,11 @@ def run_model(
         # keras.utils.plot_model(model, to_file=model_name + ".png", show_shapes=True)
 
         # optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
-        optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-        # opt = tfa.optimizers.RectifiedAdam(learning_rate=lr)
-        # # Nesterov Accelerated Gradient (NAG)
-        # #   https://kyle-r-kieser.medium.com/tuning-your-keras-sgd-neural-network-optimizer-768536c7ef0
-        # optimizer = tf.keras.optimizers.SGD(
-        #     learning_rate=lr, momentum=0.9, nesterov=True
-        # )  #  1=No friction
+        # optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+        # optimizer = tfa.optimizers.RectifiedAdam(learning_rate=lr)
+        optimizer = tf.keras.optimizers.experimental.Nadam(learning_rate=lr)
 
-        model.compile(optimizer="nadam", loss=loss, metrics=metrics)
+        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
         initial_epoch = 0
 
     else:
@@ -595,6 +602,77 @@ def plot_predictions_vs_real(df):
     return g
 
 
+def validate_parameters(params, default_params):
+
+    for key, value in params.items():
+        if key not in default_params.keys():
+            raise ValueError("Invalid parameter: %s" % key)
+
+    sat_data = params["sat_data"]
+    nbands = params["nbands"]
+    years = params["years"]
+    resizing_size = params["resizing_size"]
+
+    sat_options = ["pleiades", "landsat"]
+    if sat_data not in sat_options:
+        raise ValueError("Invalid sat_data type. Expected one of: %s" % sat_options)
+
+    if sat_data == "pleiades":
+        if (nbands != 3) and (nbands != 4):
+            raise ValueError("nbands for pleiades dataset must be 3 or 4.")
+
+        if len(years) > 3:
+            raise ValueError("Pleiades data only available in 2013, 2018 and 2022.")
+        elif not all(year in [2013, 2018, 2022] for year in years):
+            raise ValueError("Pleiades data only available in 2013, 2018 and 2022.")
+
+        if resizing_size > 1024:
+            warnings.warn(
+                "Warning: resizing_size greater than 1024 might encompass an area much bigger than the census tracts..."
+            )
+
+    elif sat_data == "landsat":
+        if nbands > 10:
+            raise ValueError("nbands for pleiades dataset must be less than 11.")
+
+        if years != [2013]:
+            raise ValueError("Landsat data only available in 2013.")
+
+        if resizing_size > 32:
+            warnings.warn(
+                "Warning: resizing_size greater than 32 might encompass an area much bigger than the census tracts..."
+            )
+
+    return
+
+
+def fill_params_defaults(params):
+
+    default_params = {
+        "model_name": "effnet_v2S",
+        "kind": "reg",
+        "weights": None,
+        "image_size": 128,
+        "resizing_size": 128,
+        "tiles": 1,
+        "nbands": 3,
+        "stacked_images": [1],
+        "sample_size": 5,
+        "small_sample": False,
+        "n_epochs": 200,
+        "learning_rate": 0.0001,
+        "sat_data": "pleiades",
+        "years": [2013],
+        "extra": "",
+    }
+    validate_parameters(params, default_params)
+
+    # Merge default and provided hyperparameters (keep from params)
+    updated_params = {**default_params, **params}
+    print(updated_params)
+    return updated_params
+
+
 def set_model_and_loss_function(
     model_name: str, kind: str, resizing_size: int, weights: str, bands: int = 4
 ):
@@ -647,21 +725,20 @@ def set_model_and_loss_function(
     return model, loss, metrics
 
 
+def generate_parameters_log(params, savename):
+
+    os.makedirs(f"{path_outputs}/{savename}", exist_ok=True)
+    filename = f"{path_outputs}/{savename}/{savename}_logs.txt"
+
+    with open(filename, "w") as file:
+        json.dump(params, file)
+
+    print(f"Se creó {filename} con los parametros utilizados.")
+    return
+
+
 def run(
-    model_name: str,
-    kind: str,
-    weights=None,
-    image_size=512,
-    resizing_size=200,
-    tiles=1,
-    nbands=4,
-    stacked_images=[1],
-    sample_size=1,
-    small_sample=False,
-    n_epochs=100,
-    sat_data="pleiades",
-    years=[2013, 2018, 2022],
-    extra="",
+    params=None,
 ):
     """Run all the code of this file.
 
@@ -670,11 +747,32 @@ def run(
     small_sample : bool, optional
         If you just want to check if the code is working, set small_sample to True, by default False
     """
+
+    params = fill_params_defaults(params)
+
+    model_name = params["model_name"]
+    kind = params["kind"]
+    weights = params["weights"]
+    image_size = params["image_size"]
+    resizing_size = params["resizing_size"]
+    tiles = params["tiles"]
+    nbands = params["nbands"]
+    stacked_images = params["stacked_images"]
+    sample_size = params["sample_size"]
+    small_sample = params["small_sample"]
+    n_epochs = params["n_epochs"]
+    learning_rate = params["learning_rate"]
+    sat_data = params["sat_data"]
+    years = params["years"]
+    extra = params["extra"]
+
+    #
+    savename = generate_savename(
+        model_name, image_size, learning_rate, stacked_images, years, extra
+    )
     log_dir = f"{path_logs}/{model_name}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
-    savename = generate_savename(
-        model_name, image_size, tiles, sample_size, extra, stacked_images
-    )
+    generate_parameters_log(params, savename)
 
     ## Set Model & loss function
     model, loss, metrics = set_model_and_loss_function(
@@ -720,7 +818,7 @@ def run(
     # Run model
     model, history = run_model(
         model_function=model,
-        lr=0.0001 * 5,
+        lr=learning_rate,
         train_dataset=train_dataset,
         val_dataset=val_dataset,
         loss=loss,
@@ -768,42 +866,21 @@ def run(
 
 
 if __name__ == "__main__":
-    image_size = 256  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    resizing_size = 128
-    sample_size = 5
-    tiles = 1
-    stacked_images = [1]
 
     variable = "ln_pred_inc_mean"
-    kind = "reg"
-    model = "effnet_v2S"
-    path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = "_years_only2013"
-    sat_data = "pleiades"
 
-    if sat_data == "pleiades":
-        years = [2013]  # , 2018, 2022]
-        nbands = 4
-    elif sat_data == "landsat":
-        years = [2013]
-        nbands = 10
-        image_data = 32
-        resizing_size = 32
-
-    # Train the Model
-    run(
-        model_name=model,
-        kind=kind,
-        small_sample=False,
-        weights=None,
-        image_size=image_size,
-        sample_size=sample_size,
-        resizing_size=resizing_size,
-        nbands=nbands,
-        tiles=tiles,
-        stacked_images=stacked_images,
-        n_epochs=200,
-        sat_data=sat_data,
-        years=years,
-        extra=extra,
+    # Selection of parameters
+    params = dict(
+        model_name="effnet_v2S",
+        learning_rate=0.0001,
+        sat_data="pleiades",
+        image_size=256,  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
+        resizing_size=128,
+        nbands=4,  # 10 for landsat
+        stacked_images=[1],
+        years=[2013],
+        extra="",
     )
+
+    # Run full pipeline
+    run(params)

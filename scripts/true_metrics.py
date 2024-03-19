@@ -537,7 +537,9 @@ def plot_mse_over_epochs(mse_df, modelname, metric="mse", save=False):
     )
 
     if save:
-        fig.write_image(f"{path_outputs}/mse_best_prediction_{modelname}.png")
+        fig.write_image(
+            f"{path_outputs}/{modelname}/mse_best_prediction_{modelname}.png"
+        )
 
 
 def plot_predictions_vs_real(
@@ -601,12 +603,13 @@ def plot_predictions_vs_real(
     if save:
         if quantiles:
             fig.write_image(
-                f"{path_outputs}/prediction_vs_real_best_prediction_{modelname}_q.png"
+                f"{path_outputs}/{modelname}/prediction_vs_real_best_prediction_{modelname}_q.png"
             )
         else:
             fig.write_image(
-                f"{path_outputs}/prediction_vs_real_best_prediction_{modelname}.png"
+                f"{path_outputs}/{modelname}/prediction_vs_real_best_prediction_{modelname}.png"
             )
+
     return fig
 
 
