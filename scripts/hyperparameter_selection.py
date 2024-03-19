@@ -85,6 +85,11 @@ def get_true_val_loss(
     return metrics_epochs
 
 
+    
+    
+    
+    
+    
 if __name__ == "__main__":
     import warnings
 
@@ -97,7 +102,7 @@ if __name__ == "__main__":
 
     variable = "ln_pred_inc_mean"
     kind = "reg"
-    model = "effnet_v2M"
+    model = "effnet_v2L"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
     extra = ""
     sat_data = "pleiades"

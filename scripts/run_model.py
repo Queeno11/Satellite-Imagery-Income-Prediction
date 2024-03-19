@@ -310,7 +310,7 @@ def create_datasets(
         ),
     )
 
-    train_dataset = train_dataset.batch(16)
+    train_dataset = train_dataset.batch(64)
     if sample_size > 1:
         train_dataset = train_dataset.repeat(sample_size).prefetch(tf.data.AUTOTUNE)
     else:
@@ -720,7 +720,7 @@ def run(
     # Run model
     model, history = run_model(
         model_function=model,
-        lr=0.0001,
+        lr=0.0001 * 5,
         train_dataset=train_dataset,
         val_dataset=val_dataset,
         loss=loss,
@@ -749,22 +749,22 @@ def run(
         generate=True,
     )
 
-    # Generate gridded predictions & plot examples
-    for year in all_years_datasets.keys():
-        grid_preds = grid_predictions.generate_grid(
-            savename,
-            all_years_datasets,
-            all_years_extents,
-            image_size,
-            resizing_size,
-            nbands,
-            stacked_images,
-            year=year,
-            generate=True,
-        )
-        grid_predictions.plot_all_examples(
-            all_years_datasets, all_years_extents, grid_preds, savename, year
-        )
+    # # Generate gridded predictions & plot examples
+    # for year in all_years_datasets.keys():
+    #     grid_preds = grid_predictions.generate_grid(
+    #         savename,
+    #         all_years_datasets,
+    #         all_years_extents,
+    #         image_size,
+    #         resizing_size,
+    #         nbands,
+    #         stacked_images,
+    #         year=year,
+    #         generate=True,
+    #     )
+    #     grid_predictions.plot_all_examples(
+    #         all_years_datasets, all_years_extents, grid_preds, savename, year
+    #     )
 
 
 if __name__ == "__main__":
@@ -776,13 +776,13 @@ if __name__ == "__main__":
 
     variable = "ln_pred_inc_mean"
     kind = "reg"
-    model = "effnet_v2L"
+    model = "effnet_v2S"
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = ""
+    extra = "_years_only2013"
     sat_data = "pleiades"
 
     if sat_data == "pleiades":
-        years = [2013, 2018, 2022]
+        years = [2013]  # , 2018, 2022]
         nbands = 4
     elif sat_data == "landsat":
         years = [2013]
