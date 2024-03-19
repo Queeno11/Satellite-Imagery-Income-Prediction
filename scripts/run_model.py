@@ -460,7 +460,7 @@ def get_callbacks(
     ]
 
 
-def run_model(
+def train_model(
     model_function: Model,
     lr: float,
     train_dataset: Iterator,
@@ -816,7 +816,7 @@ def run(
     )
 
     # Run model
-    model, history = run_model(
+    model, history = train_model(
         model_function=model,
         lr=learning_rate,
         train_dataset=train_dataset,
