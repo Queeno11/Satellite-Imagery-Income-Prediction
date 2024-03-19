@@ -325,6 +325,22 @@ def process_image(img, resizing_size, moveaxis=True):
 
 
 def augment_image(img):
+    """
+    Apply random augmentation to the input image. Image should have values in the 0-255 range.
+
+    Randomly applies the following transformations to the input image:
+    - Random flip horizontally or vertically with a 50% probability.
+    - Adjusts contrast using power law transformation.
+    - Rescales intensity by adjusting the pixel values within a random range.
+    - Rescales saturation by adjusting the saturation values within a random range.
+
+    Parameters:
+    - img (numpy.ndarray): Input image as a NumPy array.
+
+    Returns:
+    - numpy.ndarray: Augmented image as a NumPy array.
+    """
+
     # Random flip
     if np.random.rand() > 0.5:
         img = np.fliplr(img)
@@ -345,7 +361,7 @@ def augment_image(img):
     img = skimage.exposure.rescale_intensity(img, in_range=(v_min, v_max))
 
     # Rescale saturation
-    rand_sat = 0.5 + np.random.rand()
+    rand_sat = 0.5 + np.random.rand()  # Random number between 0.5 and 1.5
     img_hsv = color.rgb2hsv(img)  # hue-saturation-value
     img_hsv[:, :, 1] *= rand_sat
     img_hsv[:, :, 1] = np.clip(img_hsv[:, :, 1], 0, 255)
