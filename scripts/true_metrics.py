@@ -636,7 +636,7 @@ def plot_results(
         generate=generate,
     )
     metrics_epochs = pd.read_csv(
-        f"{path_dataout}/models_by_epoch/{savename}/{savename}_metrics_over_epochs.csv"
+        f"{path_dataout}/models_by_epoch/{savename}/{savename}_test_metrics_over_epochs.csv"
     )
 
     plot_mse_over_epochs(metrics_epochs, savename, metric="mse", save=True)
