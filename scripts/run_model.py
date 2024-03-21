@@ -91,7 +91,7 @@ def generate_savename(
         savename = f"{model_name}_lr{learning_rate}_size{image_size}_y{years_str}_stack{stacked_str}{extra}"
     else:
         savename = (
-            f"{model_name}_lr{learning_rate}_size{image_size}_y{years_str}_{extra}"
+            f"{model_name}_lr{learning_rate}_size{image_size}_y{years_str}{extra}"
         )
 
     return savename
@@ -659,7 +659,7 @@ def fill_params_defaults(params):
         "stacked_images": [1],
         "sample_size": 5,
         "small_sample": False,
-        "n_epochs": 200,
+        "n_epochs": 100,
         "learning_rate": 0.0001,
         "sat_data": "pleiades",
         "years": [2013],
@@ -872,7 +872,7 @@ if __name__ == "__main__":
     # Selection of parameters
     params = dict(
         model_name="effnet_v2S",
-        learning_rate=0.0001,
+        learning_rate=0.00001,
         sat_data="pleiades",
         image_size=256,  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
         resizing_size=128,
