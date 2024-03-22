@@ -334,7 +334,7 @@ def compute_custom_loss_all_epochs(
     tiles,
     size,
     resizing_size,
-    subset="test",  # "test" or "val"
+    subset="val",  # "test" or "val"
     n_epochs=20,
     n_bands=4,
     stacked_images=[1],
@@ -393,7 +393,7 @@ def compute_custom_loss_all_epochs(
     folder = rf"{path_satelites}/{subset}_datasets/{subset}_size{size}_tiles{tiles}_stacked{stacked_names}"
 
     # Genero las imágenes
-    if generate:
+    if generate or ~os.path.isfile(rf"{folder}/valid_links.npy"):
         print("Generando imágenes en grilla...")
         folder = generate_gridded_images(
             df,
@@ -624,6 +624,7 @@ def plot_results(
     n_bands=4,
     stacked_images=[1],
     generate=False,
+    subset="val",
 ):
     metrics_epochs = compute_custom_loss_all_epochs(
         models_dir=models_dir,
@@ -637,6 +638,7 @@ def plot_results(
         stacked_images=stacked_images,
         verbose=True,
         generate=generate,
+        subset=subset,
     )
     metrics_epochs = pd.read_csv(
         f"{path_dataout}/models_by_epoch/{savename}/{savename}_test_metrics_over_epochs.csv"
