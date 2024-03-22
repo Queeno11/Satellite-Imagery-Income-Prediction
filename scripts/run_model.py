@@ -279,10 +279,8 @@ def create_datasets(
 
     ### Generate Datasets
     # Split the data
-    df_val = df_test
-    df_train = df_not_test
-    # df_val = df_not_test.sample(frac=0.066667, random_state=200)
-    # df_train = df_not_test.drop(df_val.index)
+    df_val = df_not_test.sample(frac=0.066667, random_state=200)
+    df_train = df_not_test.drop(df_val.index)
     df_val = df_val.reset_index()
     df_train = df_train.reset_index()
     print()
