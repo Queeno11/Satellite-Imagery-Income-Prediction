@@ -85,7 +85,6 @@ def generate_savename(
     model_name, image_size, learning_rate, stacked_images, years, extra
 ):
     years_str = "-".join(map(str, years))
-    print(stacked_images)
     if len(stacked_images) > 1:
         stacked_str = "-".join(map(str, stacked_images))
         savename = f"{model_name}_lr{learning_rate}_size{image_size}_y{years_str}_stack{stacked_str}{extra}"
@@ -608,7 +607,12 @@ def validate_parameters(params, default_params):
         if key not in default_params.keys():
             raise ValueError("Invalid parameter: %s" % key)
 
-    sat_data = params["sat_data"]
+    try:
+        sat_data = params["sat_data"]
+    except:
+        print("No parameters are being validated, as sat_data is not defined...")
+        return
+
     nbands = params["nbands"]
     years = params["years"]
     resizing_size = params["resizing_size"]
@@ -652,10 +656,10 @@ def fill_params_defaults(params):
         "model_name": "effnet_v2S",
         "kind": "reg",
         "weights": None,
-        "image_size": 128,
+        "image_size": 256,
         "resizing_size": 128,
         "tiles": 1,
-        "nbands": 3,
+        "nbands": 4,
         "stacked_images": [1],
         "sample_size": 5,
         "small_sample": False,
@@ -670,6 +674,7 @@ def fill_params_defaults(params):
     # Merge default and provided hyperparameters (keep from params)
     updated_params = {**default_params, **params}
     print(updated_params)
+
     return updated_params
 
 
@@ -845,6 +850,7 @@ def run(
         n_bands=nbands,
         stacked_images=stacked_images,
         generate=True,
+        subset="test",
     )
 
     # # Generate gridded predictions & plot examples
