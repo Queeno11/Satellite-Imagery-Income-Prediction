@@ -310,7 +310,7 @@ def create_datasets(
         ),
     )
 
-    train_dataset = train_dataset.batch(64)
+    train_dataset = train_dataset.batch(32)
     if sample > 1:
         train_dataset = train_dataset.repeat(sample).prefetch(tf.data.AUTOTUNE)
     else:
