@@ -310,7 +310,7 @@ def create_datasets(
         ),
     )
 
-    train_dataset = train_dataset.batch(32)
+    train_dataset = train_dataset.batch(64)
     if sample > 1:
         train_dataset = train_dataset.repeat(sample).prefetch(tf.data.AUTOTUNE)
     else:
@@ -882,7 +882,7 @@ if __name__ == "__main__":
         resizing_size=128,
         nbands=4,  # 10 for landsat
         stacked_images=[1],
-        years=[2013],
+        years=[2013, 2018],
         extra="",
     )
 
