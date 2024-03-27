@@ -105,8 +105,10 @@ def get_true_val_loss(params):
     return df
 
 
-def compute_experiment_results(options):
+def compute_experiment_results(options, experiment_name):
     """Compute true loss if needed and plot comparison between the different options"""
+    plt.cla()
+    plt.clf()
     fig, ax = plt.subplots(1, 2, figsize=(12, 6))
     data_for_plot = {}
 
@@ -114,8 +116,8 @@ def compute_experiment_results(options):
 
         df = get_true_val_loss(params)
 
-        sns.lineplot(df["mse_train"], ax=ax[0], label=f"Baseline ({name})")
-        sns.lineplot(df["mse_test_rc"], ax=ax[1], label=f"Baseline ({name})")
+        sns.lineplot(df["mse_train"], ax=ax[0], label=f"{name}")
+        sns.lineplot(df["mse_test_rc"], ax=ax[1], label=f"{name}")
         data_for_plot[name] = df
 
     ax[0].set_ylim(0, 0.3)
@@ -129,14 +131,31 @@ def compute_experiment_results(options):
     plt.savefig(rf"{path_outputs}/{experiment_name}.png", dpi=300, bbox_inches="tight")
     print("Se creó la imagen " + rf"{path_outputs}/{experiment_name}.png")
 
+
 if __name__ == "__main__":
     import warnings
 
-    experiment_name = "learning_rates"
+    experiment_name = "learning_rate"
     options = {
-        "lr: 0.001": {"learning_rate": 0.001},
-        "lr: 0.0001": {"learning_rate": 0.0001},
-        "lr: 0.00001": {"learning_rate": 0.00001},
+        "lr=0.001": {"learning_rate": 0.001},
+        "lr=0.0001": {"learning_rate": 0.0001},
+        "lr=0.00001": {"learning_rate": 0.00001},
+    }
+    compute_experiment_results(options, experiment_name)
+
+    experiment_name = "models"
+    options = {
+        "EfficientNetV2 S": {"model_name": "effnet_v2S"},
+        "EfficientNetV2 M": {"model_name": "effnet_v2M"},
+        "EfficientNetV2 L": {"model_name": "effnet_v2L"},
+    }
+    compute_experiment_results(options, experiment_name)
+
+    experiment_name = "años_utilizados"
+    options = {
+        "2013": {"years": [2013]},
+        "2013 (80%) y 2018 (20%)": {"years": [2013, 2018]},
+        "2013 (33%), 2018 (33%) y 2022 (33%)": {"years": [2013, 2018, 2022]},
     }
 
-    compute_experiment_results(options)
+    compute_experiment_results(options, experiment_name)
