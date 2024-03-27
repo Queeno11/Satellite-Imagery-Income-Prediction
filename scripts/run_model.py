@@ -875,15 +875,15 @@ if __name__ == "__main__":
 
     # Selection of parameters
     params = dict(
-        model_name="effnet_v2M",
+        model_name="effnet_v2S",
         learning_rate=0.0001,
         sat_data="pleiades",
         image_size=256,  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
         resizing_size=128,
-        nbands=4,  # 10 for landsat
+        nbands=3,  # 10 for landsat
         stacked_images=[1],
-        years=[2013, 2018],
-        extra="",
+        years=[2013, 2018, 2022],
+        extra="_RGBonly",
     )
 
     # Run full pipeline
