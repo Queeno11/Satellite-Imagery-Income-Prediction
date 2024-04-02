@@ -135,27 +135,35 @@ def compute_experiment_results(options, experiment_name):
 if __name__ == "__main__":
     import warnings
 
-    experiment_name = "learning_rate"
-    options = {
-        "lr=0.001": {"learning_rate": 0.001},
-        "lr=0.0001": {"learning_rate": 0.0001},
-        "lr=0.00001": {"learning_rate": 0.00001},
-    }
-    compute_experiment_results(options, experiment_name)
+    # experiment_name = "learning_rate"
+    # options = {
+    #     "lr=0.001": {"learning_rate": 0.001},
+    #     "lr=0.0001": {"learning_rate": 0.0001},
+    #     "lr=0.00001": {"learning_rate": 0.00001},
+    # }
+    # compute_experiment_results(options, experiment_name)
 
-    experiment_name = "models"
-    options = {
-        "EfficientNetV2 S": {"model_name": "effnet_v2S"},
-        "EfficientNetV2 M": {"model_name": "effnet_v2M"},
-        "EfficientNetV2 L": {"model_name": "effnet_v2L"},
-    }
-    compute_experiment_results(options, experiment_name)
+    # experiment_name = "models"
+    # options = {
+    #     "EfficientNetV2 S": {"model_name": "effnet_v2S"},
+    #     "EfficientNetV2 M": {"model_name": "effnet_v2M"},
+    #     "EfficientNetV2 L": {"model_name": "effnet_v2L"},
+    # }
+    # compute_experiment_results(options, experiment_name)
 
-    experiment_name = "años_utilizados"
+    # experiment_name = "años_utilizados"
+    # options = {
+    #     "2013": {"years": [2013]},
+    #     "2013 (80%) y 2018 (20%)": {"years": [2013, 2018]},
+    #     "2013 (33%), 2018 (33%) y 2022 (33%)": {"years": [2013, 2018, 2022]},
+    # }
+
+    # compute_experiment_results(options, experiment_name)
+
+    experiment_name = "nbands"
     options = {
-        "2013": {"years": [2013]},
-        "2013 (80%) y 2018 (20%)": {"years": [2013, 2018]},
-        "2013 (33%), 2018 (33%) y 2022 (33%)": {"years": [2013, 2018, 2022]},
+        "RGB": {"nbands": 3, "extra": "_RGBonly", "years": [2013, 2018, 2022]},
+        "RGB+NIR": {"nbands": 4, "years": [2013, 2018, 2022]},
     }
 
     compute_experiment_results(options, experiment_name)
