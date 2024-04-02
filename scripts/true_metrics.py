@@ -203,6 +203,21 @@ def get_gridded_predictions_for_grid(
 
         return grid  # Polygon with amba bounds
 
+    def procesa_grilla(grid, icpag, extents):
+        grid = restrict_grid_to_ICPAG_area(grid, icpag)
+        grid = remove_sea_from_grid(grid)
+        grid = build_dataset.assign_datasets_to_gdf(grid, extents, verbose=False)
+        grid = grid.set_crs(epsg=4326, allow_override=True)
+        grid["point"] = grid.centroid
+        grid["bounds_geom"] = grid["geometry"]
+        grid = grid.set_geometry("point")
+        grid = grid.sjoin(icpag[["link", "var", "geometry"]], predicate="intersects")
+        grid = grid.reset_index(drop=True)
+        gc.collect()
+        print("data loaded")
+        
+        return grid
+    
     def get_grid_data(i):
         # Decoding from the EagerTensor object. Extracts the number/value from the tensor
         #   example: <tf.Tensor: shape=(), dtype=uint32, numpy=20> -> 20
@@ -268,18 +283,8 @@ def get_gridded_predictions_for_grid(
         grid = gpd.read_parquet(
             rf"{path_datain}/Grillas/grid_size{size}_tiles1.parquet"
         )
-
-    grid = restrict_grid_to_ICPAG_area(grid, icpag)
-    grid = remove_sea_from_grid(grid)
-    grid = build_dataset.assign_datasets_to_gdf(grid, extents, verbose=False)
-    grid = grid.set_crs(epsg=4326, allow_override=True)
-    grid["point"] = grid.centroid
-    grid["bounds_geom"] = grid["geometry"]
-    grid = grid.set_geometry("point")
-    grid = grid.sjoin(icpag[["link", "var", "geometry"]], predicate="intersects")
-    grid = grid.reset_index(drop=True)
-    print("data loaded")
-
+    grid = procesa_grilla(grid, icpag, extents)
+    
     ### TF Datasets
     print("SE VAN A GENERAR:", grid.shape[0], "IMAGENES")
     grid_dataset = tf.data.Dataset.from_generator(

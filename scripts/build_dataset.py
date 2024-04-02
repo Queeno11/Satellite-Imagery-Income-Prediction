@@ -1,5 +1,6 @@
 ##############      Configuración      ##############
 import os
+import pickle
 import pandas as pd
 import geopandas as gpd
 import seaborn as sns
@@ -39,12 +40,13 @@ from tqdm import tqdm
 import utils
 import true_metrics
 
+
 def load_satellite_datasets(year=2013, stretch=False):
     """Load satellite datasets and get their extents"""
-    
+
     if not os.path.isdir(rf"{path_satelites}/{year}"):
         raise ValueError(f"Year {year} images not found. Check they are stored in WSL!")
-    
+
     files = os.listdir(rf"{path_satelites}/{year}")
     files = [f for f in files if f.endswith(".tif")]
     assert all([os.path.isfile(rf"{path_satelites}/{year}/{f}") for f in files])
@@ -60,6 +62,7 @@ def load_satellite_datasets(year=2013, stretch=False):
 
     return datasets, extents
 
+
 def load_landsat_datasets(stretch=False):
     """Load satellite datasets and get their extents"""
 
@@ -69,7 +72,9 @@ def load_landsat_datasets(stretch=False):
     assert all([os.path.isfile(rf"{path_landsat}/{f}") for f in files])
 
     datasets = {
-        f.replace(".tif", ""): (normalize_landsat(xr.open_dataset(rf"{path_landsat}/{f}")))
+        f.replace(".tif", ""): (
+            normalize_landsat(xr.open_dataset(rf"{path_landsat}/{f}"))
+        )
         for f in files
     }
     if stretch:
@@ -78,6 +83,7 @@ def load_landsat_datasets(stretch=False):
     extents = {name: utils.get_dataset_extent(ds) for name, ds in datasets.items()}
 
     return datasets, extents
+
 
 def load_nightlight_datasets(stretch=False):
     """Load satellite datasets and get their extents"""
@@ -97,7 +103,6 @@ def load_nightlight_datasets(stretch=False):
     extents = {name: utils.get_dataset_extent(ds) for name, ds in datasets.items()}
 
     return datasets, extents
-
 
 
 def load_icpag_dataset(variable="ln_pred_inc_mean", trim=True):
@@ -122,10 +127,12 @@ def load_icpag_dataset(variable="ln_pred_inc_mean", trim=True):
     var_mean = icpag[variable].mean()
     var_std = icpag[variable].std()
     icpag["var"] = (icpag[variable] - var_mean) / var_std
-    
+
     data_dict = {"mean": var_mean, "std": var_std}
-    pd.DataFrame().from_dict(data_dict, orient="index", columns=[variable]).to_csv(rf"{path_dataout}/scalars_{variable}_trim{trim}.csv")
-    
+    pd.DataFrame().from_dict(data_dict, orient="index", columns=[variable]).to_csv(
+        rf"{path_dataout}/scalars_{variable}_trim{trim}.csv"
+    )
+
     return icpag
 
 
@@ -137,20 +144,22 @@ def assign_datasets_to_gdf(gdf, extents, year=2013, centroid=False, verbose=True
 
     if centroid:
         gdf["geometry"] = gdf.centroid
-    
+
     if year is None:
         colname = "dataset"
     else:
         colname = f"dataset_{year}"
-        
+
     for name, bbox in extents.items():
-            gdf.loc[gdf.within(bbox), colname] = name
- 
+        gdf.loc[gdf.within(bbox), colname] = name
+
     nan_links = gdf[colname].isna().sum()
     # gdf = gdf[gdf[colname].notna()]
 
     if verbose:
-        print(f"Links without images ({year}):", nan_links, "out of", len(gdf)+nan_links)
+        print(
+            f"Links without images ({year}):", nan_links, "out of", len(gdf) + nan_links
+        )
         print(f"Remaining links for train/test ({year}):", len(gdf))
         gdf.plot()
         plt.savefig(rf"{path_dataout}/links_with_images.png")
@@ -184,11 +193,14 @@ def split_train_test(df, buffer=0):
 
     # These blocks are the train dataset.
     #   The hole image have to be inside the train region
-    df.loc[df.max_x+buffer < test1_min_x, "train_block"] = 1  # A la izqauierda de test1
+    df.loc[df.max_x + buffer < test1_min_x, "train_block"] = (
+        1  # A la izqauierda de test1
+    )
     df.loc[
-        (df.min_x-buffer > test1_max_x) & (df.max_x+buffer < test2_min_x), "train_block"
+        (df.min_x - buffer > test1_max_x) & (df.max_x + buffer < test2_min_x),
+        "train_block",
     ] = 2  # Entre test1 y test2
-    df.loc[df.min_x-buffer > test2_max_x, "train_block"] = 3  # A la derecha de test2
+    df.loc[df.min_x - buffer > test2_max_x, "train_block"] = 3  # A la derecha de test2
     # print(df.train_block.value_counts())
 
     # Put nans in the overlapping borders
@@ -292,12 +304,12 @@ def get_dataset_for_gdf(icpag, datasets, link, year=2013, id_var="link"):
     - current_ds: xarray.Dataset, dataset where the census tract is located
     """
     current_ds_name = icpag.loc[icpag[id_var] == link, f"dataset_{year}"].values[0]
-    
+
     if pd.isna(current_ds_name):
         # No dataset for this census tract this year...
         current_ds = None
-        return current_ds 
-    
+        return current_ds
+
     current_ds = datasets[current_ds_name]
     return current_ds
 
@@ -634,25 +646,128 @@ def stretch_dataset(ds, pixel_depth=32_767):
     ds = ds.where(ds.band_data < pixel_depth, pixel_depth)
     return ds
 
+
 def normalize_landsat(ds):
     band_data = ds.band_data.to_numpy()
-    for band in range(band_data.shape[0]):   
+    for band in range(band_data.shape[0]):
         this_band = band_data[band]
-        
+
         vmin = np.percentile(this_band, q=2)
         vmax = np.percentile(this_band, q=98)
 
         # High values
         mask = this_band > vmax
         this_band[mask] = vmax
-        
+
         # low values
         mask = this_band < vmin
         this_band[mask] = vmin
-        
+
         # Normalize
         this_band = (this_band - vmin) / (vmax - vmin)
-        
+
         band_data[band] = this_band * 255
-        
+
     return ds
+
+
+def remove_overlapping_pixels(main, to_crop):
+
+    main_extent = utils.get_dataset_extent(main)
+    will_be_cropeed_extent = utils.get_dataset_extent(to_crop)
+    cropped_extent = will_be_cropeed_extent.difference(main_extent)
+
+    # Crop dataset
+    min_lon, min_lat, max_lon, max_lat = cropped_extent.bounds
+    cropped = to_crop.sel(x=slice(min_lon, max_lon), y=slice(max_lat, min_lat))
+
+    return cropped
+
+
+def pickle_xr_dataset(ds, filename):
+    import pickle
+
+    pkl = pickle.dumps(ds, protocol=-1)
+    with open(filename, "wb") as f:
+        f.write(pkl)
+
+    print("Pickled data saved to:", filename)
+    return
+
+
+def add_datasets_combinations(datasets):
+    from shapely.geometry import box
+
+    extents = {name: utils.get_dataset_extent(ds) for name, ds in datasets.items()}
+    combinations = {}
+    to_remove = []
+
+    for ds_name, ds in datasets.items():
+        # Construyo lista de datasets que intersectan con ds_name
+        capture_ds_name = ds_name.split("_")[1]
+        ds_extent = extents[ds_name]
+        buffered_extent = ds_extent.buffer(0.005).envelope
+        xmin, ymin, xmax, ymax = buffered_extent.bounds
+
+        intersecting = []
+        for name, ds_extent in extents.items():
+            capture_name = name.split("_")[1]
+            if (
+                ds_extent.intersects(buffered_extent)
+                & (name != ds_name)
+                & (capture_ds_name == capture_name)
+            ):
+                intersecting += [name]
+
+        # Recorto datasets de intersection (buffer de 1080px):
+        cropped_datasets = {}
+        for intersection in intersecting:
+            intersecting_ds = datasets[intersection]
+            cropped_datasets[intersection] = intersecting_ds.sel(
+                x=slice(xmin, xmax), y=slice(ymax, ymin)
+            )
+
+        # Armo xarray con la intersección de a pares
+        for cropped_name, cropped_ds in cropped_datasets.items():
+
+            names = [ds_name, cropped_name]
+            names = [name.replace("pansharpened_", "") for name in names]
+            names.sort()
+            combined_name = "comb_" + "_".join(names)
+
+            if combined_name not in combinations:
+                polygon = box(
+                    cropped_ds.x.min(),
+                    cropped_ds.y.min(),
+                    cropped_ds.x.max(),
+                    cropped_ds.y.max(),
+                )
+                buffered_extent = polygon.buffer(0.005).envelope
+                xmin, ymin, xmax, ymax = buffered_extent.bounds
+
+                cropped_main_ds = ds.sel(x=slice(xmin, xmax), y=slice(ymax, ymin))
+                cropped_ds = remove_overlapping_pixels(cropped_main_ds, cropped_ds)
+
+                # print(ds_name, cropped_name)
+                # print(cropped_main_ds)
+                # print(cropped_ds)
+
+                try:
+                    result_ds = xr.combine_by_coords(
+                        [cropped_main_ds, cropped_ds], combine_attrs="override"
+                    )
+
+                    # Store xarray and reload to remove cross-references across objects and reduce memory usage
+                    filename = rf"{path_dataout}\tempfiles\{combined_name}.pkl"
+                    pickle_xr_dataset(ds, filename)
+                    with open(filename, "rb") as f:
+                        result_ds = pickle.load(f)
+                    to_remove += [filename]
+
+                    combinations[combined_name] = result_ds
+                except Exception as e:
+                    print(e)
+
+    all_datasets = combinations | datasets
+
+    return all_datasets
