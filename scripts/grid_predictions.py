@@ -260,25 +260,41 @@ def plot_example(grid_preds, bbox, modelname, datasets, extents, img_savename):
 
     icpag = build_dataset.load_icpag_dataset(variable="ln_pred_inc_mean", trim=False)
 
-    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+    # Group predictions by census tract:
+    by_link = grid_preds.groupby("link").agg({"prediction": "mean"}).reset_index()
+    icpag = icpag.merge(by_link, on="link", how="outer")
+
+    fig, axs = plt.subplots(2, 2, figsize=(10, 10))
     # Imagen satelital
     for ds_name in ds_names:
         ds = datasets[ds_name]
-        ds_plot_example(ds, poly, ax=axs[0])
-        ds_plot_example(ds, poly, ax=axs[1])
-        ds_plot_example(ds, poly, ax=axs[2])
+        ds_plot_example(ds, poly, ax=axs[0][0])
+        ds_plot_example(ds, poly, ax=axs[0][1])
+        ds_plot_example(ds, poly, ax=axs[1][0])
+        ds_plot_example(ds, poly, ax=axs[1][1])
 
-    axs[0].set_title("Imagen satelital")
+    axs[0][0].set_title("Imagen satelital", fontsize=18)
+
     # Censo
     bins = gdf_plot_example(
-        icpag, var="var", poly=poly, ax=axs[2]
+        icpag, var="var", poly=poly, ax=axs[1][1]
     )  # , vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
-    axs[2].set_title("Ingreso estructural por small area")
+    axs[1][1].set_title("Datos de Evaluación", fontsize=18)
+
     # Predicciones
     gdf_plot_example(
-        grid_preds, var="prediction", poly=poly, ax=axs[1], bins=bins
+        grid_preds, var="prediction", poly=poly, ax=axs[0][1], bins=bins
     )  # , vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
-    axs[1].set_title("Ingreso predicho por imagenes satelitales")
+    axs[0][1].set_title("Nuestra aproximación", fontsize=18)
+
+    # Predicciones por RC
+    gdf_plot_example(
+        icpag, var="prediction", poly=poly, ax=axs[1][0], bins=bins
+    )  # , vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
+    axs[1][0].set_title(
+        "Nuestra aproximación (media por Radio Censal)",
+        fontsize=18,
+    )
 
     fig.tight_layout()
 
