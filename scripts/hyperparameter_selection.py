@@ -160,10 +160,16 @@ if __name__ == "__main__":
 
     # compute_experiment_results(options, experiment_name)
 
-    experiment_name = "nbands"
-    options = {
-        "RGB": {"nbands": 3, "extra": "_RGBonly", "years": [2013, 2018, 2022]},
-        "RGB+NIR": {"nbands": 4, "years": [2013, 2018, 2022]},
-    }
+    # experiment_name = "nbands"
+    # options = {
+    #     "RGB": {"nbands": 3, "extra": "_RGBonly", "years": [2013, 2018, 2022]},
+    #     "RGB+NIR": {"nbands": 4, "years": [2013, 2018, 2022]},
+    # }
 
+    experiment_name = "img_size"
+    options = {
+        "50x50mts": {"image_size": 128, "years": [2013, 2018, 2022]},
+        "100x100mts": {"image_size": 256, "years": [2013, 2018, 2022]},
+        "200x200mts": {"image_size": 512, "years": [2013, 2018, 2022]},
+    }
     compute_experiment_results(options, experiment_name)

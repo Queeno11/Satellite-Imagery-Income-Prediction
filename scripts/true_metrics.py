@@ -215,9 +215,9 @@ def get_gridded_predictions_for_grid(
         grid = grid.reset_index(drop=True)
         gc.collect()
         print("data loaded")
-        
+
         return grid
-    
+
     def get_grid_data(i):
         # Decoding from the EagerTensor object. Extracts the number/value from the tensor
         #   example: <tf.Tensor: shape=(), dtype=uint32, numpy=20> -> 20
@@ -284,7 +284,7 @@ def get_gridded_predictions_for_grid(
             rf"{path_datain}/Grillas/grid_size{size}_tiles1.parquet"
         )
     grid = procesa_grilla(grid, icpag, extents)
-    
+
     ### TF Datasets
     print("SE VAN A GENERAR:", grid.shape[0], "IMAGENES")
     grid_dataset = tf.data.Dataset.from_generator(
@@ -325,7 +325,7 @@ def get_batch_predictions(model, batch_images):
     """
     to_predict = tf.data.Dataset.from_tensor_slices(batch_images)
 
-    to_predict = to_predict.batch(64)
+    to_predict = to_predict.batch(16)
     predictions = model.predict(to_predict)
     predictions = predictions.flatten()
 

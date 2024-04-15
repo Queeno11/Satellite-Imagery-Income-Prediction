@@ -43,6 +43,7 @@ import true_metrics
 
 def load_satellite_datasets(year=2013, stretch=False):
     """Load satellite datasets and get their extents"""
+    print(rf"{path_satelites}/{year}")
 
     if not os.path.isdir(rf"{path_satelites}/{year}"):
         raise ValueError(f"Year {year} images not found. Check they are stored in WSL!")
@@ -758,7 +759,7 @@ def add_datasets_combinations(datasets):
                     )
 
                     # Store xarray and reload to remove cross-references across objects and reduce memory usage
-                    filename = rf"{path_dataout}\tempfiles\{combined_name}.pkl"
+                    filename = rf"{path_dataout}/tempfiles/{combined_name}.pkl"
                     pickle_xr_dataset(ds, filename)
                     with open(filename, "rb") as f:
                         result_ds = pickle.load(f)
