@@ -99,7 +99,7 @@ def get_true_val_loss(params):
         metrics_path,
         index_col="epoch",
         usecols=["epoch", "mse_train", "mse_test_rc"],
-        nrows=100,
+        nrows=n_epochs,
     )
 
     return df
@@ -116,8 +116,16 @@ def compute_experiment_results(options, experiment_name):
 
         df = get_true_val_loss(params)
 
-        sns.lineplot(df["mse_train"], ax=ax[0], label=f"{name}")
-        sns.lineplot(df["mse_test_rc"], ax=ax[1], label=f"{name}")
+        sns.lineplot(
+            df["mse_train"].ewm(span=5, adjust=False).mean(),
+            ax=ax[0],
+            label=f"{name}",
+        )
+        sns.lineplot(
+            df["mse_test_rc"].ewm(span=5, adjust=False).mean(),
+            ax=ax[1],
+            label=f"{name}",
+        )
         data_for_plot[name] = df
 
     ax[0].set_ylim(0, 0.3)
@@ -135,41 +143,76 @@ def compute_experiment_results(options, experiment_name):
 if __name__ == "__main__":
     import warnings
 
-    # experiment_name = "learning_rate"
-    # options = {
-    #     "lr=0.001": {"learning_rate": 0.001},
-    #     "lr=0.0001": {"learning_rate": 0.0001},
-    #     "lr=0.00001": {"learning_rate": 0.00001},
-    # }
-    # compute_experiment_results(options, experiment_name)
+    experiment_name = "learning_rate"
+    options = {
+        "lr=0.001": {"learning_rate": 0.001, "n_epochs": 100},
+        "lr=0.0001": {"learning_rate": 0.0001, "n_epochs": 100},
+        "lr=0.00001": {"learning_rate": 0.00001, "n_epochs": 100},
+    }
+    compute_experiment_results(options, experiment_name)
 
-    # experiment_name = "models"
-    # options = {
-    #     "EfficientNetV2 S": {"model_name": "effnet_v2S"},
-    #     "EfficientNetV2 M": {"model_name": "effnet_v2M"},
-    #     "EfficientNetV2 L": {"model_name": "effnet_v2L"},
-    # }
-    # compute_experiment_results(options, experiment_name)
+    experiment_name = "models"
+    options = {
+        "EfficientNetV2 S": {"model_name": "effnet_v2S", "n_epochs": 100},
+        "EfficientNetV2 M": {"model_name": "effnet_v2M", "n_epochs": 100},
+        "EfficientNetV2 L": {"model_name": "effnet_v2L", "n_epochs": 100},
+    }
+    compute_experiment_results(options, experiment_name)
 
-    # experiment_name = "años_utilizados"
-    # options = {
-    #     "2013": {"years": [2013]},
-    #     "2013 (80%) y 2018 (20%)": {"years": [2013, 2018]},
-    #     "2013 (33%), 2018 (33%) y 2022 (33%)": {"years": [2013, 2018, 2022]},
-    # }
+    experiment_name = "años_utilizados"
+    options = {
+        "2013": {"years": [2013], "n_epochs": 100},
+        "2013 (80%) y 2018 (20%)": {"years": [2013, 2018], "n_epochs": 100},
+        "2013 (33%), 2018 (33%) y 2022 (33%)": {
+            "years": [2013, 2018, 2022],
+            "n_epochs": 100,
+        },
+    }
 
-    # compute_experiment_results(options, experiment_name)
+    compute_experiment_results(options, experiment_name)
 
-    # experiment_name = "nbands"
-    # options = {
-    #     "RGB": {"nbands": 3, "extra": "_RGBonly", "years": [2013, 2018, 2022]},
-    #     "RGB+NIR": {"nbands": 4, "years": [2013, 2018, 2022]},
-    # }
+    experiment_name = "nbands"
+    options = {
+        "RGB": {
+            "nbands": 3,
+            "extra": "_RGBonly",
+            "years": [2013, 2018, 2022],
+            "n_epochs": 100,
+        },
+        "RGB+NIR": {"nbands": 4, "years": [2013, 2018, 2022], "n_epochs": 100},
+    }
 
     experiment_name = "img_size"
     options = {
-        "50x50mts": {"image_size": 128, "years": [2013, 2018, 2022]},
-        "100x100mts": {"image_size": 256, "years": [2013, 2018, 2022]},
-        "200x200mts": {"image_size": 512, "years": [2013, 2018, 2022]},
+        "50x50mts": {
+            "image_size": 128,
+            "years": [2013, 2018, 2022],
+            "stacked_images": [1],
+            "n_epochs": 150,
+        },
+        "100x100mts": {
+            "image_size": 256,
+            "years": [2013, 2018, 2022],
+            "stacked_images": [1],
+            "n_epochs": 150,
+        },
+        "200x200mts": {
+            "image_size": 512,
+            "years": [2013, 2018, 2022],
+            "stacked_images": [1],
+            "n_epochs": 150,
+        },
+        "50x50mts + 100x100mts": {
+            "image_size": 128,
+            "years": [2013, 2018, 2022],
+            "stacked_images": [1, 2],
+            "n_epochs": 150,
+        },
+        "50x50mts + 200x200mts": {
+            "image_size": 128,
+            "years": [2013, 2018, 2022],
+            "stacked_images": [1, 4],
+            "n_epochs": 150,
+        },
     }
     compute_experiment_results(options, experiment_name)
