@@ -85,13 +85,12 @@ def generate_savename(
     model_name, image_size, learning_rate, stacked_images, years, extra
 ):
     years_str = "-".join(map(str, years))
-    print(stacked_images)
     if len(stacked_images) > 1:
         stacked_str = "-".join(map(str, stacked_images))
         savename = f"{model_name}_lr{learning_rate}_size{image_size}_y{years_str}_stack{stacked_str}{extra}"
     else:
         savename = (
-            f"{model_name}_lr{learning_rate}_size{image_size}_y{years_str}_{extra}"
+            f"{model_name}_lr{learning_rate}_size{image_size}_y{years_str}{extra}"
         )
 
     return savename
@@ -280,10 +279,8 @@ def create_datasets(
 
     ### Generate Datasets
     # Split the data
-    df_val = df_test
-    df_train = df_not_test
-    # df_val = df_not_test.sample(frac=0.066667, random_state=200)
-    # df_train = df_not_test.drop(df_val.index)
+    df_val = df_not_test.sample(frac=0.066667, random_state=200)
+    df_train = df_not_test.drop(df_val.index)
     df_val = df_val.reset_index()
     df_train = df_train.reset_index()
     print()
@@ -608,7 +605,12 @@ def validate_parameters(params, default_params):
         if key not in default_params.keys():
             raise ValueError("Invalid parameter: %s" % key)
 
-    sat_data = params["sat_data"]
+    try:
+        sat_data = params["sat_data"]
+    except:
+        print("No parameters are being validated, as sat_data is not defined...")
+        return
+
     nbands = params["nbands"]
     years = params["years"]
     resizing_size = params["resizing_size"]
@@ -652,14 +654,14 @@ def fill_params_defaults(params):
         "model_name": "effnet_v2S",
         "kind": "reg",
         "weights": None,
-        "image_size": 128,
+        "image_size": 256,
         "resizing_size": 128,
         "tiles": 1,
-        "nbands": 3,
+        "nbands": 4,
         "stacked_images": [1],
         "sample_size": 5,
         "small_sample": False,
-        "n_epochs": 200,
+        "n_epochs": 100,
         "learning_rate": 0.0001,
         "sat_data": "pleiades",
         "years": [2013],
@@ -670,6 +672,7 @@ def fill_params_defaults(params):
     # Merge default and provided hyperparameters (keep from params)
     updated_params = {**default_params, **params}
     print(updated_params)
+
     return updated_params
 
 
@@ -691,15 +694,19 @@ def set_model_and_loss_function(
         "effnet_v2L": custom_models.efficientnet_v2L(
             resizing_size, bands=bands, kind=kind, weights=weights
         ),
+        "spatialecon_cnn": custom_models.spatialecon_cnn(
+            resizing_size,
+            bands=bands,
+        ),
     }
 
     # Validación de parámetros
     assert kind in ["reg", "cla"], "kind must be either 'reg' or 'cla'"
-    assert (
-        model_name in get_model_from_name.keys()
-    ), "model_name must be one of the following: " + str(
-        list(get_model_from_name.keys())
-    )
+    # assert (
+    #     model_name in get_model_from_name.keys()
+    # ), "model_name must be one of the following: " + str(
+    #     list(get_model_from_name.keys())
+    # )
 
     # Get model
     model = get_model_from_name[model_name]
@@ -739,6 +746,9 @@ def generate_parameters_log(params, savename):
 
 def run(
     params=None,
+    train=True,
+    compute_loss=True,
+    generate_grid=False,
 ):
     """Run all the code of this file.
 
@@ -774,95 +784,98 @@ def run(
 
     generate_parameters_log(params, savename)
 
-    ## Set Model & loss function
-    model, loss, metrics = set_model_and_loss_function(
-        model_name=model_name,
-        kind=kind,
-        bands=nbands * len(stacked_images),
-        resizing_size=resizing_size,
-        weights=weights,
-    )
-
     all_years_datasets, all_years_extents, df = open_datasets(
         sat_data=sat_data, years=years
     )
 
-    # ### Create train and test dataframes from ICPAG
-    df_not_test, df_test = create_train_test_dataframes(
-        df, savename, small_sample=small_sample
-    )
+    if train:
 
-    ## Transform dataframes into datagenerators:
-    #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
-    print("Setting up data generators...")
-    train_dataset, val_dataset, test_dataset = create_datasets(
-        df_not_test=df_not_test,
-        df_test=df_test,
-        all_years_datasets=all_years_datasets,
-        image_size=image_size,
-        resizing_size=resizing_size,
-        nbands=nbands,
-        stacked_images=stacked_images,
-        tiles=tiles,
-        sample=sample_size,
-        savename=savename,
-        save_examples=True,
-    )
-    # Get tensorboard callbacks and set the custom test loss computation
-    #   at the end of each epoch
-    callbacks = get_callbacks(
-        savename=savename,
-        logdir=log_dir,
-    )
+        ## Set Model & loss function
+        model, loss, metrics = set_model_and_loss_function(
+            model_name=model_name,
+            kind=kind,
+            bands=nbands * len(stacked_images),
+            resizing_size=resizing_size,
+            weights=weights,
+        )
 
-    # Run model
-    model, history = train_model(
-        model_function=model,
-        lr=learning_rate,
-        train_dataset=train_dataset,
-        val_dataset=val_dataset,
-        loss=loss,
-        metrics=metrics,
-        callbacks=callbacks,
-        epochs=n_epochs,
-        savename=savename,
-    )
-    print("Fin del entrenamiento")
-    # raise SystemExit
+        # ### Create train and test dataframes from ICPAG
+        df_not_test, df_test = create_train_test_dataframes(
+            df, savename, small_sample=small_sample
+        )
 
-    # Compute metrics
-    hist_df = pd.read_csv(
-        rf"{path_dataout}/models_by_epoch/{savename}/{savename}_history.csv"
-    )
-    true_metrics.plot_results(  # No entra el test_dataset acá pero despues usa el df_test guardado en memoria
-        models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
-        savename=savename,
-        datasets=all_years_datasets[2013],
-        tiles=tiles,
-        size=image_size,
-        resizing_size=resizing_size,
-        n_epochs=hist_df.index.max(),
-        n_bands=nbands,
-        stacked_images=stacked_images,
-        generate=True,
-    )
+        ## Transform dataframes into datagenerators:
+        #    instead of iterating over census tracts (dataframes), we will generate one (or more) images per census tract
+        print("Setting up data generators...")
+        train_dataset, val_dataset, test_dataset = create_datasets(
+            df_not_test=df_not_test,
+            df_test=df_test,
+            all_years_datasets=all_years_datasets,
+            image_size=image_size,
+            resizing_size=resizing_size,
+            nbands=nbands,
+            stacked_images=stacked_images,
+            tiles=tiles,
+            sample=sample_size,
+            savename=savename,
+            save_examples=True,
+        )
+        # Get tensorboard callbacks and set the custom test loss computation
+        #   at the end of each epoch
+        callbacks = get_callbacks(
+            savename=savename,
+            logdir=log_dir,
+        )
 
-    # # Generate gridded predictions & plot examples
-    # for year in all_years_datasets.keys():
-    #     grid_preds = grid_predictions.generate_grid(
-    #         savename,
-    #         all_years_datasets,
-    #         all_years_extents,
-    #         image_size,
-    #         resizing_size,
-    #         nbands,
-    #         stacked_images,
-    #         year=year,
-    #         generate=True,
-    #     )
-    #     grid_predictions.plot_all_examples(
-    #         all_years_datasets, all_years_extents, grid_preds, savename, year
-    #     )
+        # Run model
+        model, history = train_model(
+            model_function=model,
+            lr=learning_rate,
+            train_dataset=train_dataset,
+            val_dataset=val_dataset,
+            loss=loss,
+            metrics=metrics,
+            callbacks=callbacks,
+            epochs=n_epochs,
+            savename=savename,
+        )
+        print("Fin del entrenamiento")
+
+    ## Compute metrics
+    # Genero la test_loss por RC
+    if compute_loss:
+        true_metrics.compute_loss(  # No entra el test_dataset acá pero despues usa el df_test guardado en memoria
+            models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
+            savename=savename,
+            datasets=all_years_datasets[2013],
+            tiles=tiles,
+            size=image_size,
+            resizing_size=resizing_size,
+            n_epochs=n_epochs,
+            n_bands=nbands,
+            stacked_images=stacked_images,
+            generate=False,
+            subset="test",
+        )
+
+    if generate_grid:
+        print("Generando predicciones...")
+        # Generate gridded predictions & plot examples
+        for year in all_years_datasets.keys():
+            grid_preds = grid_predictions.generate_grid(
+                savename,
+                all_years_datasets,
+                all_years_extents,
+                image_size,
+                resizing_size,
+                nbands,
+                stacked_images,
+                year=year,
+                generate=True,
+            )
+            grid_predictions.plot_all_examples(
+                all_years_datasets, all_years_extents, grid_preds, savename, year
+            )
 
 
 if __name__ == "__main__":
@@ -877,10 +890,29 @@ if __name__ == "__main__":
         image_size=256,  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
         resizing_size=128,
         nbands=4,  # 10 for landsat
-        stacked_images=[1],
-        years=[2013],
+        stacked_images=[1, 2],
+        years=[2013, 2018, 2022],
         extra="",
+        n_epochs=150,
+        sample_size=5,
     )
+    params = {
+        "model_name": "effnet_v2M",
+        "kind": "reg",
+        "weights": None,
+        "image_size": 256,
+        "resizing_size": 128,
+        "tiles": 1,
+        "nbands": 4,
+        "stacked_images": [1],
+        "sample_size": 5,
+        "small_sample": False,
+        "n_epochs": 100,
+        "learning_rate": 0.0001,
+        "sat_data": "pleiades",
+        "years": [2013],
+        "extra": "",
+    }
 
     # Run full pipeline
-    run(params)
+    run(params, train=False, compute_loss=True, generate_grid=False)

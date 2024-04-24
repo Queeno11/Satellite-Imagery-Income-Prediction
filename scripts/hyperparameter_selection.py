@@ -39,6 +39,7 @@ import random
 import pandas as pd
 import xarray as xr
 import tensorflow as tf
+import matplotlib.pyplot as plt
 
 try:
     physical_devices = tf.config.list_physical_devices("GPU")
@@ -47,83 +48,171 @@ except:
     print("No GPU set. Is the GPU already initialized?")
 
 
-def get_true_val_loss(
-    model_name,
-    sat_data,
-    tiles,
-    size,
-    resizing_size,
-    n_epochs,
-    n_bands,
-    stacked_images,
-    generate,
-):
+def get_true_val_loss(params):
+
+    params = run_model.fill_params_defaults(params)
+
+    model_name = params["model_name"]
+    kind = params["kind"]
+    weights = params["weights"]
+    image_size = params["image_size"]
+    resizing_size = params["resizing_size"]
+    tiles = params["tiles"]
+    nbands = params["nbands"]
+    stacked_images = params["stacked_images"]
+    sample_size = params["sample_size"]
+    small_sample = params["small_sample"]
+    n_epochs = params["n_epochs"]
+    learning_rate = params["learning_rate"]
+    sat_data = params["sat_data"]
+    years = params["years"]
+    extra = params["extra"]
 
     savename = run_model.generate_savename(
-        model_name, image_size, tiles, sample_size, extra, stacked_images
+        model_name, image_size, learning_rate, stacked_images, years, extra
+    )
+    metrics_path = rf"{path_dataout}/models_by_epoch/{savename}/{savename}_test_metrics_over_epochs.csv"
+    if not os.path.exists(metrics_path):
+
+        all_years_datasets, all_years_extents, df = run_model.open_datasets(
+            sat_data=sat_data, years=[2013]
+        )
+
+        metrics_epochs = true_metrics.compute_custom_loss_all_epochs(
+            rf"{path_dataout}/models_by_epoch/{savename}",
+            savename,
+            all_years_datasets[
+                2013
+            ],  # Only 2013 because I want to test with the ground truth images...
+            tiles,
+            image_size,
+            resizing_size,
+            "test",
+            n_epochs,
+            nbands,
+            stacked_images,
+            generate=False,
+            verbose=True,
+        )
+
+    df = pd.read_csv(
+        metrics_path,
+        index_col="epoch",
+        usecols=["epoch", "mse_train", "mse_test_rc"],
+        nrows=n_epochs,
     )
 
-    all_years_datasets, all_years_extents, df = run_model.open_datasets(
-        sat_data=sat_data, years=[2013]
-    )
-
-    metrics_epochs = true_metrics.compute_custom_loss_all_epochs(
-        rf"{path_dataout}/models_by_epoch/{savename}",
-        savename,
-        all_years_datasets[2013],
-        tiles,
-        size,
-        resizing_size,
-        "val",
-        n_epochs,
-        n_bands,
-        stacked_images,
-        generate,
-        verbose=True,
-    )
-
-    return metrics_epochs
+    return df
 
 
-    
-    
-    
-    
-    
+def compute_experiment_results(options, experiment_name):
+    """Compute true loss if needed and plot comparison between the different options"""
+    plt.cla()
+    plt.clf()
+    fig, ax = plt.subplots(1, 2, figsize=(12, 6))
+    data_for_plot = {}
+
+    for name, params in options.items():
+
+        df = get_true_val_loss(params)
+
+        sns.lineplot(
+            df["mse_train"].ewm(span=5, adjust=False).mean(),
+            ax=ax[0],
+            label=f"{name}",
+        )
+        sns.lineplot(
+            df["mse_test_rc"].ewm(span=5, adjust=False).mean(),
+            ax=ax[1],
+            label=f"{name}",
+        )
+        data_for_plot[name] = df
+
+    ax[0].set_ylim(0, 0.3)
+    ax[0].set_ylabel("")
+    ax[0].set_title("ECM Entrenamiento")
+
+    ax[1].set_ylim(0, 0.3)
+    ax[1].set_ylabel("")
+    ax[1].set_title("ECM Conjunto de Prueba (media radio censal)")
+
+    plt.savefig(rf"{path_outputs}/{experiment_name}.png", dpi=300, bbox_inches="tight")
+    print("Se creó la imagen " + rf"{path_outputs}/{experiment_name}.png")
+
+
 if __name__ == "__main__":
     import warnings
 
-    image_size = 256  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
-    resizing_size = 128
-    sample_size = 5
-    tiles = 1
-    stacked_images = [1]
-    epochs = 200
+    experiment_name = "learning_rate"
+    options = {
+        "lr=0.001": {"learning_rate": 0.001, "n_epochs": 100},
+        "lr=0.0001": {"learning_rate": 0.0001, "n_epochs": 100},
+        "lr=0.00001": {"learning_rate": 0.00001, "n_epochs": 100},
+    }
+    compute_experiment_results(options, experiment_name)
 
-    variable = "ln_pred_inc_mean"
-    kind = "reg"
-    model = "effnet_v2L"
-    path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
-    extra = ""
-    sat_data = "pleiades"
+    experiment_name = "models"
+    options = {
+        "EfficientNetV2 S": {"model_name": "effnet_v2S", "n_epochs": 100},
+        "EfficientNetV2 M": {"model_name": "effnet_v2M", "n_epochs": 100},
+        "EfficientNetV2 L": {"model_name": "effnet_v2L", "n_epochs": 100},
+    }
+    compute_experiment_results(options, experiment_name)
 
-    if sat_data == "pleiades":
-        years = [2013, 2018, 2022]
-        nbands = 4
-    elif sat_data == "landsat":
-        years = [2013]
-        nbands = 10
-        image_data = 32
-        resizing_size = 32
+    experiment_name = "años_utilizados"
+    options = {
+        "2013": {"years": [2013], "n_epochs": 100},
+        "2013 (80%) y 2018 (20%)": {"years": [2013, 2018], "n_epochs": 100},
+        "2013 (33%), 2018 (33%) y 2022 (33%)": {
+            "years": [2013, 2018, 2022],
+            "n_epochs": 100,
+        },
+    }
 
-    get_true_val_loss(
-        model,
-        sat_data,
-        tiles,
-        image_size,
-        resizing_size,
-        epochs,
-        nbands,
-        stacked_images,
-        generate=True,
-    )
+    compute_experiment_results(options, experiment_name)
+
+    experiment_name = "nbands"
+    options = {
+        "RGB": {
+            "nbands": 3,
+            "extra": "_RGBonly",
+            "years": [2013, 2018, 2022],
+            "n_epochs": 100,
+        },
+        "RGB+NIR": {"nbands": 4, "years": [2013, 2018, 2022], "n_epochs": 100},
+    }
+
+    experiment_name = "img_size"
+    options = {
+        "50x50mts": {
+            "image_size": 128,
+            "years": [2013, 2018, 2022],
+            "stacked_images": [1],
+            "n_epochs": 150,
+        },
+        "100x100mts": {
+            "image_size": 256,
+            "years": [2013, 2018, 2022],
+            "stacked_images": [1],
+            "n_epochs": 150,
+        },
+        "200x200mts": {
+            "image_size": 512,
+            "years": [2013, 2018, 2022],
+            "stacked_images": [1],
+            "n_epochs": 150,
+        },
+        "50x50mts + 100x100mts": {
+            "image_size": 128,
+            "years": [2013, 2018, 2022],
+            "stacked_images": [1, 2],
+            "n_epochs": 150,
+        },
+        "50x50mts + 200x200mts": {
+            "image_size": 128,
+            "years": [2013, 2018, 2022],
+            "stacked_images": [1, 4],
+            "n_epochs": 150,
+        },
+    }
+    compute_experiment_results(options, experiment_name)

@@ -203,6 +203,21 @@ def get_gridded_predictions_for_grid(
 
         return grid  # Polygon with amba bounds
 
+    def procesa_grilla(grid, icpag, extents):
+        grid = restrict_grid_to_ICPAG_area(grid, icpag)
+        grid = remove_sea_from_grid(grid)
+        grid = build_dataset.assign_datasets_to_gdf(grid, extents, verbose=False)
+        grid = grid.set_crs(epsg=4326, allow_override=True)
+        grid["point"] = grid.centroid
+        grid["bounds_geom"] = grid["geometry"]
+        grid = grid.set_geometry("point")
+        grid = grid.sjoin(icpag[["link", "var", "geometry"]], predicate="intersects")
+        grid = grid.reset_index(drop=True)
+        gc.collect()
+        print("data loaded")
+
+        return grid
+
     def get_grid_data(i):
         # Decoding from the EagerTensor object. Extracts the number/value from the tensor
         #   example: <tf.Tensor: shape=(), dtype=uint32, numpy=20> -> 20
@@ -268,17 +283,7 @@ def get_gridded_predictions_for_grid(
         grid = gpd.read_parquet(
             rf"{path_datain}/Grillas/grid_size{size}_tiles1.parquet"
         )
-
-    grid = restrict_grid_to_ICPAG_area(grid, icpag)
-    grid = remove_sea_from_grid(grid)
-    grid = build_dataset.assign_datasets_to_gdf(grid, extents, verbose=False)
-    grid = grid.set_crs(epsg=4326, allow_override=True)
-    grid["point"] = grid.centroid
-    grid["bounds_geom"] = grid["geometry"]
-    grid = grid.set_geometry("point")
-    grid = grid.sjoin(icpag[["link", "var", "geometry"]], predicate="intersects")
-    grid = grid.reset_index(drop=True)
-    print("data loaded")
+    grid = procesa_grilla(grid, icpag, extents)
 
     ### TF Datasets
     print("SE VAN A GENERAR:", grid.shape[0], "IMAGENES")
@@ -320,7 +325,7 @@ def get_batch_predictions(model, batch_images):
     """
     to_predict = tf.data.Dataset.from_tensor_slices(batch_images)
 
-    to_predict = to_predict.batch(64)
+    to_predict = to_predict.batch(16)
     predictions = model.predict(to_predict)
     predictions = predictions.flatten()
 
@@ -334,7 +339,7 @@ def compute_custom_loss_all_epochs(
     tiles,
     size,
     resizing_size,
-    subset="test",  # "test" or "val"
+    subset="val",  # "test" or "val"
     n_epochs=20,
     n_bands=4,
     stacked_images=[1],
@@ -393,7 +398,7 @@ def compute_custom_loss_all_epochs(
     folder = rf"{path_satelites}/{subset}_datasets/{subset}_size{size}_tiles{tiles}_stacked{stacked_names}"
 
     # Genero las imágenes
-    if generate:
+    if generate or ~os.path.isfile(rf"{folder}/valid_links.npy"):
         print("Generando imágenes en grilla...")
         folder = generate_gridded_images(
             df,
@@ -442,6 +447,26 @@ def compute_custom_loss_all_epochs(
     )
 
     for epoch in range(0, n_epochs):
+        filename = (
+            f"{path_dataout}/models_by_epoch/{savename}/{savename}_{subset}_{epoch}.csv"
+        )
+
+        if os.path.exists(filename):
+            df_preds = pd.read_csv(filename)
+            df_preds["mean_prediction"] = df_preds.groupby(
+                by="link"
+            ).predictions.transform("mean")
+            df_preds["error"] = df_preds["mean_prediction"] - df_preds["real_value"]
+            df_preds["sq_error"] = df_preds["error"] ** 2
+            mse = df_preds.drop_duplicates(subset=["link"]).sq_error.mean()
+
+            print(f"Epoch {epoch}/{n_epochs}: True Mean Squared Error: {mse}")
+
+            # Store MSE value in dict and full predictions
+            mse_epochs[epoch] = mse
+
+            continue
+
         try:
             model.load_weights(
                 f"{models_dir}/{savename}_{epoch}/variables/variables"
@@ -475,17 +500,7 @@ def compute_custom_loss_all_epochs(
 
         # Store MSE value in dict and full predictions
         mse_epochs[epoch] = mse
-        df_preds.to_csv(
-            f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}.csv"
-        )
-
-        # Delete variables to release memory
-        # del model
-        # del predictions
-        # del d
-        # del df_preds
-        # tf.keras.backend.clear_session()
-        # gc.collect()
+        df_preds.to_csv(filename)
 
     # Export csv with all MSE
     mse_test = pd.DataFrame().from_dict(
@@ -510,6 +525,167 @@ def compute_custom_loss_all_epochs(
     )
 
     return metrics_epochs
+
+
+def compute_custom_loss_for_epoch(
+    models_dir,
+    savename,
+    datasets,
+    tiles,
+    size,
+    resizing_size,
+    subset="val",  # "test" or "val"
+    n_epochs=20,
+    n_bands=4,
+    stacked_images=[1],
+    generate=False,
+    verbose=False,
+    kind="reg",
+    epoch=100,
+):
+    """
+    Calcula el ECM del conjunto de predicción en una sola epoca.
+
+    Carga las bases necesarias, itera sobre los radios censales, genera las imágenes
+    en forma de grilla y compara las predicciones de esas imágenes con el valor real
+    del radio censal.
+
+    Parameters:
+    -----------
+    tiles: int, cantidad de imágenes a generar por lado
+    size: int, tamaño de la imagen a generar, en píxeles
+    resizing_size: int, tamaño al que se redimensiona la imagen
+    bias: int, cantidad de píxeles que se mueve el punto aleatorio de las tiles
+    to8bit: bool, si es True, convierte la imagen a 8 bits
+
+    Returns:
+    --------
+    mse: float, error cuadrático medio del conjunto de predicción
+
+    """
+    import geopandas as gpd
+    from tqdm import tqdm
+
+    if verbose == False:
+        blockPrint()
+
+    if subset not in ["test", "val"]:
+        raise ValueError("subset must be either 'test' or 'val'")
+
+    print("Loading data...")
+    if subset == "test":
+        df = gpd.read_feather(
+            rf"{path_dataout}/test_datasets/{savename}_test_dataframe.feather"
+        )
+    elif subset == "val":
+        df_not_test = gpd.read_feather(
+            rf"{path_dataout}/train_datasets/{savename}_train_dataframe.feather"
+        )
+        df = df_not_test.sample(frac=0.066667, random_state=200)
+        df = df.reset_index()
+        df.to_csv(rf"{path_dataout}/val_datasets/{savename}_val_dataframe.feather")
+    print("Data loaded!")
+
+    # dir of the images
+    stacked_names = "-".join(
+        str(x) for x in stacked_images
+    )  # Transforms list [1,2] to string like "1-2"
+    folder = rf"{path_satelites}/{subset}_datasets/{subset}_size{size}_tiles{tiles}_stacked{stacked_names}"
+
+    # Genero las imágenes
+    if generate or ~os.path.isfile(rf"{folder}/valid_links.npy"):
+        print("Generando imágenes en grilla...")
+        folder = generate_gridded_images(
+            df,
+            datasets,
+            folder,
+            tiles,
+            size,
+            resizing_size,
+            n_bands,
+            stacked_images,
+            year=2013,
+        )
+
+    links = np.load(rf"{folder}/valid_links.npy")
+
+    # Cargo todas las imágenes en memoria
+    print("Cargando arrays en memoria...")
+    # blockPrint()
+    link_names = []
+    real_values = []
+    images = []
+
+    for link in tqdm(links):
+        # Obtener las imágenes del radio censal
+        link_real_value = df.loc[df["link"] == link, "var"].values[0]
+        link_images = np.load(rf"{folder}/test_{link}.npy")
+        q_images = link_images.shape[0]
+
+        link_names += [link] * q_images
+        real_values += [link_real_value] * q_images
+        images += [link_images]
+
+    # Agrega al batch de valores reales / imagenes para la prediccion
+    images = np.concatenate(images, axis=0)
+    link_names = np.array(link_names)
+    real_values = np.array(real_values)
+    print("Arrays cargados!")
+
+    model_name = savename.split("_")[0] + "_" + savename.split("_")[1]
+    model, _, _ = run_model.set_model_and_loss_function(
+        model_name=model_name,
+        kind=kind,
+        bands=n_bands * len(stacked_images),
+        resizing_size=resizing_size,
+        weights=None,
+    )
+
+    model.load_weights(
+        f"{models_dir}/{savename}_{epoch}/variables/variables"
+    ).expect_partial()
+
+    # model = tf.keras.models.load_model(
+    #     f"{models_dir}/{savename}_{epoch}", compile=True
+    # )
+    predictions = get_batch_predictions(model, images)
+
+    # Creo dataframe para exportar:
+    d = {
+        "link": link_names,
+        "predictions": predictions,
+        "real_value": real_values,
+    }
+    df_preds = pd.DataFrame(data=d)
+
+    df_preds["mean_prediction"] = df_preds.groupby(by="link").predictions.transform(
+        "mean"
+    )
+    df_preds["error"] = df_preds["mean_prediction"] - df_preds["real_value"]
+    df_preds["sq_error"] = df_preds["error"] ** 2
+    mse = df_preds.drop_duplicates(subset=["link"]).sq_error.mean()
+    variance = df_preds.drop_duplicates(subset=["link"]).real_value.var()
+    r2 = 1 - mse / variance
+    # enablePrint()
+    print(f"TEST Mean Squared Error: {mse} (Epoch {epoch}/{n_epochs})")
+    print(f"TEST R Squared: {r2} (Epoch {epoch}/{n_epochs})")
+
+    # Store MSE value in dict and full predictions
+    results = {"mse": mse, "variance": variance, "Rsquared": r2}
+    with open(
+        f"{path_dataout}/models_by_epoch/{savename}/{savename}_{subset}_results.txt",
+        "w",
+    ) as file:
+        # Write each key-value pair in the dictionary to the file
+        for key, value in results.items():
+            file.write(f"{key}: {value}\n")
+
+    # Store full df for scatterplots and analysis
+    df_preds.to_csv(
+        f"{path_dataout}/models_by_epoch/{savename}/{savename}_{subset}_{epoch}.csv"
+    )
+
+    return df_preds
 
 
 def plot_mse_over_epochs(mse_df, modelname, metric="mse", save=False):
@@ -543,23 +719,15 @@ def plot_mse_over_epochs(mse_df, modelname, metric="mse", save=False):
 
 
 def plot_predictions_vs_real(
-    mse_df, modelname, quantiles=False, last_training=False, save=False
+    modelname, selected_epoch, quantiles=False, last_training=False, save=False
 ):
     import plotly.express as px
     from plotly import graph_objects as go
 
     folder = f"{path_dataout}/models_by_epoch/{modelname}"
 
-    # Select best epoch... ¿Is this correct?
-    best_case_epoch = mse_df.loc[
-        mse_df["mse_test_rc"] == mse_df["mse_test_rc"].min()
-    ].index.values[0]
-
-    if last_training:
-        best_case_epoch = 199
-
     # Open dataset
-    best_case = pd.read_csv(rf"{folder}/{modelname}_{best_case_epoch}.csv")
+    best_case = pd.read_csv(rf"{folder}/{modelname}_test_{selected_epoch}.csv")
     best_case = (
         best_case.groupby("link")[["real_value", "mean_prediction"]]
         .mean()
@@ -613,7 +781,7 @@ def plot_predictions_vs_real(
     return fig
 
 
-def plot_results(
+def compute_loss(
     models_dir,
     savename,
     datasets,  # Only for 2013!! all_years_datasets have to be filtered before
@@ -624,7 +792,9 @@ def plot_results(
     n_bands=4,
     stacked_images=[1],
     generate=False,
+    subset="val",
 ):
+    # Computo val_loss por RC
     metrics_epochs = compute_custom_loss_all_epochs(
         models_dir=models_dir,
         savename=savename,
@@ -637,14 +807,40 @@ def plot_results(
         stacked_images=stacked_images,
         verbose=True,
         generate=generate,
+        subset="val",
     )
+    optimal_epoch = metrics_epochs.loc[
+        metrics_epochs["mse_test_rc"] == metrics_epochs["mse_test_rc"].min()
+    ].index.values[0]
+
+    # Computo test_loss por RC
+    metrics_epochs = compute_custom_loss_for_epoch(
+        models_dir=models_dir,
+        savename=savename,
+        datasets=datasets,
+        tiles=tiles,
+        size=size,
+        resizing_size=resizing_size,
+        n_epochs=n_epochs,
+        n_bands=n_bands,
+        stacked_images=stacked_images,
+        verbose=True,
+        generate=generate,
+        subset=subset,
+        epoch=optimal_epoch,
+    )
+
     metrics_epochs = pd.read_csv(
-        f"{path_dataout}/models_by_epoch/{savename}/{savename}_test_metrics_over_epochs.csv"
+        f"{path_dataout}/models_by_epoch/{savename}/{savename}_val_metrics_over_epochs.csv"
     )
 
     plot_mse_over_epochs(metrics_epochs, savename, metric="mse", save=True)
-    plot_predictions_vs_real(metrics_epochs, savename, quantiles=False, save=True)
-    plot_predictions_vs_real(metrics_epochs, savename, quantiles=True, save=True)
+    plot_predictions_vs_real(
+        savename, selected_epoch=optimal_epoch, quantiles=False, save=True
+    )
+    plot_predictions_vs_real(
+        savename, selected_epoch=optimal_epoch, quantiles=True, save=True
+    )
 
 
 def rerun_train_val_metrics(
