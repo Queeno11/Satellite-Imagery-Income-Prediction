@@ -481,7 +481,7 @@ def compute_custom_loss_all_epochs(
         # Store MSE value in dict and full predictions
         mse_epochs[epoch] = mse
         df_preds.to_csv(
-            f"{path_dataout}/models_by_epoch/{savename}/{savename}_{epoch}.csv"
+            f"{path_dataout}/models_by_epoch/{savename}/{savename}_{subset}_{epoch}.csv"
         )
 
         # Delete variables to release memory
@@ -548,7 +548,7 @@ def plot_mse_over_epochs(mse_df, modelname, metric="mse", save=False):
 
 
 def plot_predictions_vs_real(
-    mse_df, modelname, quantiles=False, last_training=False, save=False
+    mse_df, modelname, selected_epoch, quantiles=False, last_training=False, save=False
 ):
     import plotly.express as px
     from plotly import graph_objects as go
@@ -556,15 +556,13 @@ def plot_predictions_vs_real(
     folder = f"{path_dataout}/models_by_epoch/{modelname}"
 
     # Select best epoch... ¿Is this correct?
-    best_case_epoch = mse_df.loc[
-        mse_df["mse_test_rc"] == mse_df["mse_test_rc"].min()
-    ].index.values[0]
+    best_case_epoch = mse_df.iloc[selected_epoch].index.values[0]
 
     if last_training:
         best_case_epoch = 199
 
     # Open dataset
-    best_case = pd.read_csv(rf"{folder}/{modelname}_{best_case_epoch}.csv")
+    best_case = pd.read_csv(rf"{folder}/{modelname}_test_{best_case_epoch}.csv")
     best_case = (
         best_case.groupby("link")[["real_value", "mean_prediction"]]
         .mean()
@@ -618,7 +616,7 @@ def plot_predictions_vs_real(
     return fig
 
 
-def plot_results(
+def compute_loss(
     models_dir,
     savename,
     datasets,  # Only for 2013!! all_years_datasets have to be filtered before
@@ -631,6 +629,23 @@ def plot_results(
     generate=False,
     subset="val",
 ):
+    # Computo val_loss por RC
+    metrics_epochs = compute_custom_loss_all_epochs(
+        models_dir=models_dir,
+        savename=savename,
+        datasets=datasets,
+        tiles=tiles,
+        size=size,
+        resizing_size=resizing_size,
+        n_epochs=n_epochs,
+        n_bands=n_bands,
+        stacked_images=stacked_images,
+        verbose=True,
+        generate=generate,
+        subset="val",
+    )
+
+    # Computo test_loss por RC
     metrics_epochs = compute_custom_loss_all_epochs(
         models_dir=models_dir,
         savename=savename,

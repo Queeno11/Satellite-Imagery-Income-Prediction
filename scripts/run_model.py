@@ -747,7 +747,7 @@ def generate_parameters_log(params, savename):
 def run(
     params=None,
     train=True,
-    plot_results=True,
+    compute_loss=True,
     generate_grid=False,
 ):
     """Run all the code of this file.
@@ -841,9 +841,10 @@ def run(
         )
         print("Fin del entrenamiento")
 
-    # Compute metrics
-    if plot_results:
-        true_metrics.plot_results(  # No entra el test_dataset acá pero despues usa el df_test guardado en memoria
+    ## Compute metrics
+    # Genero la test_loss por RC
+    if compute_loss:
+        true_metrics.compute_loss(  # No entra el test_dataset acá pero despues usa el df_test guardado en memoria
             models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
             savename=savename,
             datasets=all_years_datasets[2013],
@@ -858,23 +859,6 @@ def run(
         )
 
     if generate_grid:
-        # if not os.path.isfile(
-        #     rf"{path_dataout}/models_by_epoch/{savename}/{savename}_val_metrics_over_epochs.csv"
-        # ):
-        true_metrics.plot_results(  # No entra el test_dataset acá pero despues usa el df_test guardado en memoria
-            models_dir=rf"{path_dataout}/models_by_epoch/{savename}",
-            savename=savename,
-            datasets=all_years_datasets[2013],
-            tiles=tiles,
-            size=image_size,
-            resizing_size=resizing_size,
-            n_epochs=n_epochs,
-            n_bands=nbands,
-            stacked_images=stacked_images,
-            generate=False,
-            subset="val",
-        )
-
         print("Generando predicciones...")
         # Generate gridded predictions & plot examples
         for year in all_years_datasets.keys():
@@ -903,7 +887,7 @@ if __name__ == "__main__":
         model_name="effnet_v2S",
         learning_rate=0.0001,
         sat_data="pleiades",
-        image_size=128,  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
+        image_size=256,  # FIXME: Creo que solo anda con numeros pares, alguna vez estaría bueno arreglarlo...
         resizing_size=128,
         nbands=4,  # 10 for landsat
         stacked_images=[1, 2],
@@ -914,4 +898,4 @@ if __name__ == "__main__":
     )
 
     # Run full pipeline
-    run(params, train=False, plot_results=True, generate_grid=True)
+    run(params, train=False, compute_loss=True, generate_grid=False)
