@@ -896,6 +896,23 @@ if __name__ == "__main__":
         n_epochs=150,
         sample_size=5,
     )
+    params = {
+        "model_name": "effnet_v2M",
+        "kind": "reg",
+        "weights": None,
+        "image_size": 256,
+        "resizing_size": 128,
+        "tiles": 1,
+        "nbands": 4,
+        "stacked_images": [1],
+        "sample_size": 5,
+        "small_sample": False,
+        "n_epochs": 100,
+        "learning_rate": 0.0001,
+        "sat_data": "pleiades",
+        "years": [2013],
+        "extra": "",
+    }
 
     # Run full pipeline
     run(params, train=False, compute_loss=True, generate_grid=False)
