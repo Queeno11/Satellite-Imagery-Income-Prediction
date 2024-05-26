@@ -10,14 +10,7 @@ from os.path import dirname
 
 # Parameters for the algorithm
 sat_captures = [
-    #"000047717_1_22_STD_A",
-    "000047717_1_24_STD_A",
-    #"000047717_1_25_STD_A",
-    #"000047717_1_26_STD_A",
-    # "000058605_1_3_STD_A",
-    # "000058605_1_4_STD_A",
-    # "000058605_1_7_STD_A",
-    # "000058608_1_2_STD_A",
+    "000058605_1_4_STD_A",
 ]
 
 path = r"F:\Imagenes Satelitales\2022"

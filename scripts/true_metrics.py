@@ -325,7 +325,7 @@ def get_batch_predictions(model, batch_images):
     """
     to_predict = tf.data.Dataset.from_tensor_slices(batch_images)
 
-    to_predict = to_predict.batch(16)
+    to_predict = to_predict.batch(8)
     predictions = model.predict(to_predict)
     predictions = predictions.flatten()
 

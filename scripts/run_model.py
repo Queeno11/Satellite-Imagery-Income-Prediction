@@ -871,7 +871,7 @@ def run(
                 nbands,
                 stacked_images,
                 year=year,
-                generate=True,
+                generate=False,
             )
             grid_predictions.plot_all_examples(
                 all_years_datasets, all_years_extents, grid_preds, savename, year
@@ -897,22 +897,22 @@ if __name__ == "__main__":
         sample_size=5,
     )
     params = {
-        "model_name": "effnet_v2M",
+        "model_name": "effnet_v2S",
         "kind": "reg",
         "weights": None,
-        "image_size": 256,
+        "image_size": 128,
         "resizing_size": 128,
         "tiles": 1,
         "nbands": 4,
-        "stacked_images": [1],
+        "stacked_images": [1, 4],
         "sample_size": 5,
         "small_sample": False,
-        "n_epochs": 100,
+        "n_epochs": 150,
         "learning_rate": 0.0001,
         "sat_data": "pleiades",
-        "years": [2013],
+        "years": [2013, 2018, 2022],
         "extra": "",
     }
 
     # Run full pipeline
-    run(params, train=False, compute_loss=True, generate_grid=False)
+    run(params, train=False, compute_loss=False, generate_grid=True)

@@ -109,7 +109,7 @@ def compute_experiment_results(options, experiment_name):
     """Compute true loss if needed and plot comparison between the different options"""
     plt.cla()
     plt.clf()
-    fig, ax = plt.subplots(1, 2, figsize=(12, 6))
+    fig, ax = plt.subplots(1, 2, figsize=(6.5, 3), sharey=True)
     data_for_plot = {}
 
     for name, params in options.items():
@@ -120,21 +120,28 @@ def compute_experiment_results(options, experiment_name):
             df["mse_train"].ewm(span=5, adjust=False).mean(),
             ax=ax[0],
             label=f"{name}",
+            legend=True,
         )
         sns.lineplot(
             df["mse_test_rc"].ewm(span=5, adjust=False).mean(),
             ax=ax[1],
             label=f"{name}",
+            legend=False,
         )
         data_for_plot[name] = df
 
     ax[0].set_ylim(0, 0.3)
     ax[0].set_ylabel("")
     ax[0].set_title("ECM Entrenamiento")
+    ax[0].set_xlabel("Época")
+    sns.despine(ax=ax[0])
 
     ax[1].set_ylim(0, 0.3)
     ax[1].set_ylabel("")
-    ax[1].set_title("ECM Conjunto de Prueba (media radio censal)")
+    ax[1].set_title("ECM Conjunto de Prueba")
+    ax[1].set_xlabel("Época")
+    sns.despine(ax=ax[1])
+    sns.move_legend(ax[0], "lower left")
 
     plt.savefig(rf"{path_outputs}/{experiment_name}.png", dpi=300, bbox_inches="tight")
     print("Se creó la imagen " + rf"{path_outputs}/{experiment_name}.png")
@@ -162,8 +169,8 @@ if __name__ == "__main__":
     experiment_name = "años_utilizados"
     options = {
         "2013": {"years": [2013], "n_epochs": 100},
-        "2013 (80%) y 2018 (20%)": {"years": [2013, 2018], "n_epochs": 100},
-        "2013 (33%), 2018 (33%) y 2022 (33%)": {
+        "2013 y 2018": {"years": [2013, 2018], "n_epochs": 100},
+        "2013, 2018 y 2022": {
             "years": [2013, 2018, 2022],
             "n_epochs": 100,
         },
@@ -181,38 +188,39 @@ if __name__ == "__main__":
         },
         "RGB+NIR": {"nbands": 4, "years": [2013, 2018, 2022], "n_epochs": 100},
     }
-
-    experiment_name = "img_size"
-    options = {
-        "50x50mts": {
-            "image_size": 128,
-            "years": [2013, 2018, 2022],
-            "stacked_images": [1],
-            "n_epochs": 150,
-        },
-        "100x100mts": {
-            "image_size": 256,
-            "years": [2013, 2018, 2022],
-            "stacked_images": [1],
-            "n_epochs": 150,
-        },
-        "200x200mts": {
-            "image_size": 512,
-            "years": [2013, 2018, 2022],
-            "stacked_images": [1],
-            "n_epochs": 150,
-        },
-        "50x50mts + 100x100mts": {
-            "image_size": 128,
-            "years": [2013, 2018, 2022],
-            "stacked_images": [1, 2],
-            "n_epochs": 150,
-        },
-        "50x50mts + 200x200mts": {
-            "image_size": 128,
-            "years": [2013, 2018, 2022],
-            "stacked_images": [1, 4],
-            "n_epochs": 150,
-        },
-    }
     compute_experiment_results(options, experiment_name)
+
+    # experiment_name = "img_size"
+    # options = {
+    #     "50x50mts": {
+    #         "image_size": 128,
+    #         "years": [2013, 2018, 2022],
+    #         "stacked_images": [1],
+    #         "n_epochs": 150,
+    #     },
+    #     "100x100mts": {
+    #         "image_size": 256,
+    #         "years": [2013, 2018, 2022],
+    #         "stacked_images": [1],
+    #         "n_epochs": 150,
+    #     },
+    #     "200x200mts": {
+    #         "image_size": 512,
+    #         "years": [2013, 2018, 2022],
+    #         "stacked_images": [1],
+    #         "n_epochs": 150,
+    #     },
+    #     "50x50mts + 100x100mts": {
+    #         "image_size": 128,
+    #         "years": [2013, 2018, 2022],
+    #         "stacked_images": [1, 2],
+    #         "n_epochs": 150,
+    #     },
+    #     "50x50mts + 200x200mts": {
+    #         "image_size": 128,
+    #         "years": [2013, 2018, 2022],
+    #         "stacked_images": [1, 4],
+    #         "n_epochs": 150,
+    #     },
+    # }
+    # compute_experiment_results(options, experiment_name)
