@@ -64,6 +64,49 @@ def load_satellite_datasets(year=2013, stretch=False):
     return datasets, extents
 
 
+def load_satellite_mfdatasets(year=2013, stretch=False):
+    """Load satellite datasets and get their extents"""
+    print(rf"{path_satelites}/{year}")
+    import warnings
+
+    warnings.simplefilter("ignore")
+
+    if not os.path.isdir(rf"{path_satelites}/{year}"):
+        raise ValueError(f"Year {year} images not found. Check they are stored in WSL!")
+
+    files = os.listdir(rf"{path_satelites}/{year}")
+    files = [f for f in files if f.endswith(".tif")]
+    capture_ids = set([f.split("_")[1] for f in files])
+
+    assert all([os.path.isfile(rf"{path_satelites}/{year}/{f}") for f in files])
+
+    files_by_id = {}
+    datasets = {}
+    for capture_id in capture_ids:
+        # for capture_id, files in files_by_id.items():
+        id_files = [rf"{path_satelites}/{year}/{f}" for f in files if capture_id in f]
+        id_files_matrix = generate_matrix_of_files(id_files)
+        ds = xr.open_mfdataset(
+            id_files_matrix,
+            combine="nested",
+            concat_dim=["x", "y"],
+            engine="rasterio",
+            chunks={"x": 1000, "y": 1000},
+        )
+
+        if stretch:
+            print(
+                "Warning: Stretching dataset might not be compatible with new loading method..."
+            )
+            ds = stretch_dataset(ds)
+
+        datasets[capture_id] = ds
+
+    extents = {name: utils.get_dataset_extent(ds, 512) for name, ds in datasets.items()}
+
+    return datasets, extents
+
+
 def load_landsat_datasets(stretch=False):
     """Load satellite datasets and get their extents"""
 
@@ -772,3 +815,60 @@ def add_datasets_combinations(datasets):
     all_datasets = combinations | datasets
 
     return all_datasets
+
+
+def filter_black_pixels_over_dim(ds, dim="x"):
+    if dim == "x":
+        other_dim = "y"
+    elif dim == "y":
+        other_dim = "x"
+    else:
+        raise ValueError("dim must be 'x' or 'y'")
+
+    # Selecciono la mitad de la imagen
+    center = int(ds[dim].size / 2)
+    edge_data = ds.isel({dim: center})
+
+    # Busco los pixeles con al menos 50 pixeles sin datos
+    has_black_pixels = (edge_data["band_data"] == 0).all(dim="band")
+    has_black_pixels_in_row = has_black_pixels.rolling({other_dim: 50}).sum()
+    valid_data = (has_black_pixels_in_row == 0) | (has_black_pixels_in_row.isnull())
+
+    # Filtro los datos
+    first_valid = valid_data.to_numpy().tolist().index(True)
+    last_valid = -valid_data.to_numpy().tolist()[::-1].index(True)
+
+    if first_valid == 0:
+        first_valid = None
+    if last_valid == 0:
+        last_valid = None
+
+    return ds.isel({other_dim: slice(first_valid, last_valid)})
+
+
+def filter_black_pixels(ds):
+    y_filtered = filter_black_pixels_over_dim(ds, "y")
+    filtered = filter_black_pixels_over_dim(y_filtered, "x")
+    return filtered
+
+
+def generate_matrix_of_files(files):
+    """Create a matrix of files to be loaded by xr.open_mfdataset.
+
+    Files are ordered as the original tiles, where R1C3 is the first tile of the third column.
+    Run xr.open_mfdataset(matrix, combine="nested", concat_dim=["x", "y"], engine="rasterio") after this.
+
+    Parameters:
+    files (list): List of files to be loaded
+
+    Returns:
+    matrix (list): List of lists of files to be loaded by xr.open_mfdataset
+    """
+    files.sort()
+
+    matrix = []
+    for col in range(1, 5):
+        cols_files = [f for f in files if f"C{col}.tif" in f]
+        if len(cols_files) > 0:
+            matrix += [cols_files]
+    return matrix
