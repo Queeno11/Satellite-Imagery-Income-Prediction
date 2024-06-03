@@ -196,12 +196,12 @@ def generate_grid(
     year_datasets = all_years_datasets[year]
     year_extents = all_years_extents[year]
 
-    year_datasets = build_dataset.add_datasets_combinations(year_datasets)
-    year_extents = {
-        name: utils.get_dataset_extent(ds) for name, ds in year_datasets.items()
-    }
-    gc.collect()
-    print("combinacion generada")
+    # year_datasets = build_dataset.add_datasets_combinations(year_datasets)
+    # year_extents = {
+    #     name: utils.get_dataset_extent(ds, image_size)
+    #     for name, ds in year_datasets.items()
+    # }
+    # gc.collect()
 
     # Cargo datasets
     icpag = build_dataset.load_icpag_dataset(trim=False)
@@ -230,6 +230,7 @@ def generate_grid(
             icpag,
             image_size,
             resizing_size,
+            year=year,
             n_bands=nbands,
             stacked_images=stacked_images,
         )
@@ -260,41 +261,25 @@ def plot_example(grid_preds, bbox, modelname, datasets, extents, img_savename):
 
     icpag = build_dataset.load_icpag_dataset(variable="ln_pred_inc_mean", trim=False)
 
-    # Group predictions by census tract:
-    by_link = grid_preds.groupby("link").agg({"prediction": "mean"}).reset_index()
-    icpag = icpag.merge(by_link, on="link", how="outer")
-
-    fig, axs = plt.subplots(1, 3, figsize=(9, 3))
+    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
     # Imagen satelital
     for ds_name in ds_names:
         ds = datasets[ds_name]
         ds_plot_example(ds, poly, ax=axs[0])
         ds_plot_example(ds, poly, ax=axs[1])
         ds_plot_example(ds, poly, ax=axs[2])
-        # ds_plot_example(ds, poly, ax=axs[1][1])
 
-    axs[0].set_title("Satellite Image", fontsize=22)
-
+    axs[0].set_title("Imagen satelital", fontsize=26)
     # Censo
     bins = gdf_plot_example(
-        icpag, var="var", poly=poly, ax=axs[1][1]
+        icpag, var="var", poly=poly, ax=axs[2]
     )  # , vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
-    axs[2].set_title("Test Dataset", fontsize=22)
-
+    axs[2].set_title("Datos censales", fontsize=26)
     # Predicciones
     gdf_plot_example(
-        grid_preds, var="prediction", poly=poly, ax=axs[0][1], bins=bins
+        grid_preds, var="prediction", poly=poly, ax=axs[1], bins=bins
     )  # , vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
-    axs[1].set_title("Satellite Image Predictions", fontsize=22)
-
-    # # Predicciones por RC
-    # gdf_plot_example(
-    #     icpag, var="prediction", poly=poly, ax=axs[1][0], bins=bins
-    # )  # , vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
-    # axs[1][0].set_title(
-    #     "Nuestra aproximación (media por Radio Censal)",
-    #     fontsize=18,
-    # )
+    axs[1].set_title("Nuestra aproximación", fontsize=26)
 
     fig.tight_layout()
 
@@ -341,7 +326,7 @@ def plot_time_evolution(
         ds_plot_example(ds, poly, ax=axs[0])
         ds_plot_example(ds, poly, ax=axs[1])
 
-    axs[0][0].set_title("Imagen satelital", fontsize=18)
+    axs[0][0].set_title("Imagen satelital", fontsize=26)
 
     _, bins = pd.qcut(icpag["var"], 10, retbins=True, labels=False)
 
@@ -350,7 +335,7 @@ def plot_time_evolution(
     gdf_plot_example(
         grid_preds, var="prediction", poly=poly, ax=axs[0][1], bins=bins
     )  # , vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
-    axs[0][1].set_title("Nuestra aproximación", fontsize=18)
+    axs[0][1].set_title("Nuestra aproximación", fontsize=26)
 
     # Predicciones dif 2022
     gdf_plot_example(
@@ -358,7 +343,7 @@ def plot_time_evolution(
     )  # , vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
     axs[1][0].set_title(
         "Nuestra aproximación (media por Radio Censal)",
-        fontsize=18,
+        fontsize=26,
     )
 
     fig.tight_layout()
@@ -398,7 +383,7 @@ def plot_grid(grid_preds, modelname, year=2013):
     )  # , vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
     axs[1].set_title("Ingreso estructural por small area")
     gdf_plot_example(
-        grid_preds[grid_preds["prediction"] != grid_preds["prediction"].mode()],
+        grid_preds,  # [grid_preds["prediction"] != grid_preds["prediction"].mode()],
         var="prediction",
         poly=poly,
         ax=axs[0],
