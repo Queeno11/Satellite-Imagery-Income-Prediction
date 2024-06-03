@@ -133,7 +133,7 @@ def generate_gridded_images(
 
 
 def get_gridded_predictions_for_grid(
-    model, datasets, extents, icpag, size, resizing_size, n_bands, stacked_images
+    model, datasets, extents, icpag, size, resizing_size, n_bands, stacked_images, year
 ):
     """
     Generate gridded predictions for a given GeoDataFrame grid using a machine learning model.
@@ -206,7 +206,10 @@ def get_gridded_predictions_for_grid(
     def procesa_grilla(grid, icpag, extents):
         grid = restrict_grid_to_ICPAG_area(grid, icpag)
         grid = remove_sea_from_grid(grid)
-        grid = build_dataset.assign_datasets_to_gdf(grid, extents, verbose=False)
+        grid = build_dataset.assign_datasets_to_gdf(
+            grid, extents, year=year, verbose=False
+        )
+        grid = grid.dropna(subset=[f"dataset_{year}"])
         grid = grid.set_crs(epsg=4326, allow_override=True)
         grid["point"] = grid.centroid
         grid["bounds_geom"] = grid["geometry"]
@@ -222,9 +225,7 @@ def get_gridded_predictions_for_grid(
         # Decoding from the EagerTensor object. Extracts the number/value from the tensor
         #   example: <tf.Tensor: shape=(), dtype=uint32, numpy=20> -> 20
         i = i.numpy()
-
         # initialize iterators & params
-        iteration = 0
         image = np.zeros(shape=(n_bands, 0, 0))
         total_bands = n_bands * len(stacked_images)
         img_correct_shape = (total_bands, size, size)
@@ -236,7 +237,9 @@ def get_gridded_predictions_for_grid(
         radio_censal = icpag.loc[icpag.contains(raster_point)]
         if radio_censal.empty:
             # El radio censal no existe, es el medio del mar...
-            print("Radio censal vacio:", id_point, raster_point)
+            print(
+                f"Point {raster_point} (id: {id_point}) doesn't belong to any census tract..."
+            )
             image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
             return image
 
@@ -244,28 +247,27 @@ def get_gridded_predictions_for_grid(
         link_name = radio_censal["link"].values[0]
 
         cell_dataset = build_dataset.get_dataset_for_gdf(
-            grid, datasets, id_point, id_var="id"
+            grid, datasets, id_point, year=year, id_var="id"
         )
         if cell_dataset is None:
+            print(
+                f"No dataset for point {raster_point} (id: {id_point}) in link {link_name}, moving to next image..."
+            )
             image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
             return image
 
-        while (image.shape != img_correct_shape) & (iteration <= 5):
-
-            # Generate the image
-            image, boundaries = utils.stacked_image_from_census_tract(
-                dataset=cell_dataset,
-                polygon=None,
-                img_size=size,
-                n_bands=n_bands,
-                stacked_images=stacked_images,
-                point=raster_point,
-            )
-            iteration += 1
-
-        if iteration >= 5:
+        # Generate the image
+        image, _ = utils.stacked_image_from_census_tract(
+            dataset=cell_dataset,
+            polygon=None,
+            point=raster_point,
+            img_size=size,
+            n_bands=n_bands,
+            stacked_images=stacked_images,
+        )
+        if image.shape != img_correct_shape:
             print(
-                f"More than 5 interations for link {link_name}, moving to next image..."
+                f"Could not retrieve a valid image for point {raster_point} (id: {id_point}) in link {link_name}, moving to next image..."
             )
             image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
             return image
