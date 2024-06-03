@@ -2,12 +2,13 @@ import cv2
 import shapely
 import numpy as np
 import geopandas as gpd
+import xarray as xr
 import skimage
 from skimage import color
 from shapely import Point
 
 
-def get_dataset_extent(ds):
+def get_dataset_extent(ds, image_size=None):
     """Return a polygon with the extent of the dataset
 
     Params:
@@ -16,6 +17,10 @@ def get_dataset_extent(ds):
     Returns:
     polygon: shapely polygon with the extent of the dataset
     """
+
+    if image_size is not None:
+        limit = int(image_size)
+        ds = ds.isel(x=slice(limit, -limit), y=slice(limit, -limit))
 
     x_min = ds.x.min()
     x_max = ds.x.max()
@@ -117,6 +122,47 @@ def image_from_point(dataset, point, img_size=128):
     image = dataset.isel(x=slice(idx_x_min, idx_x_max), y=slice(idx_y_min, idx_y_max))
 
     image = image.band_data
+
+    if image.chunks is not None:
+        # If the image is not computed, compute it
+        image = image.compute()
+
+    return image
+
+
+def image_from_point_dss(datasets, point, img_size=128):
+
+    raster_size_x = (datasets[0].x[1] - datasets[0].x[0]).values
+    raster_size_y = (datasets[0].y[1] - datasets[0].y[0]).values
+    images = []
+    for dataset in datasets:
+        image = dataset.sel(
+            x=slice(
+                point[0] - raster_size_x * (img_size - 1) / 2,
+                point[0] + raster_size_x * img_size / 2,
+            ),
+            y=slice(
+                point[1] - raster_size_y * (img_size - 1) / 2,
+                point[1] + raster_size_y * img_size / 2,
+            ),
+        )
+        if 0 in image.band_data.shape:
+            # Datasets doesn't contain image
+            continue
+        images += [image.band_data]
+
+    image = xr.combine_by_coords(images, combine_attrs="override")
+
+    # If any of the indexes are negative, move to the next iteration
+    if image.x.size < img_size | image.y.size < img_size:
+        image = np.zeros(shape=(1, 1, 1))
+        print("Error en imagen")
+        return image
+
+    # if image.chunks is not None:
+    #     # If the image is not computed, compute it
+    #     image = image.compute()
+
     return image
 
 
@@ -162,9 +208,12 @@ def stacked_image_from_census_tract(
 
         try:
             image = image_da.to_numpy()[:n_bands, ::size_multiplier, ::size_multiplier]
+            # print(image)
+            image = np.nan_to_num(image)
             image = image.astype(np.uint8)
             images_to_stack += [image]
-        except:
+        except Exception as e:
+            # print(e)
             image = np.zeros(shape=(n_bands, 1, 1))
             bounds = None
             return image, bounds
