@@ -180,8 +180,19 @@ def load_icpag_dataset(variable="ln_pred_inc_mean", trim=True):
     return icpag
 
 
-def assign_datasets_to_gdf(gdf, extents, year=2013, centroid=False, verbose=True):
-    """Assign each geometry a dataset if the census tract falls within the extent of the dataset (images)"""
+def assign_datasets_to_gdf(
+    gdf, extents, year=2013, centroid=False, select="first_match", verbose=True
+):
+    """Assign each geometry a dataset if the census tract falls within the extent of the dataset (images)
+
+    Parameters:
+    -----------
+    gdf: geopandas.GeoDataFrame, shapefile with the census tracts
+    extents: dict, dictionary with the extents of the satellite datasets
+    year: int, year of the satellite images
+    centroid: bool, if True, the centroid of the census tract is used to assign the dataset
+    select: str, method to select the dataset. Options are "first_match" or "all_matches"
+    """
     import warnings
 
     warnings.filterwarnings("ignore")
@@ -194,8 +205,23 @@ def assign_datasets_to_gdf(gdf, extents, year=2013, centroid=False, verbose=True
     else:
         colname = f"dataset_{year}"
 
-    for name, bbox in extents.items():
-        gdf.loc[gdf.within(bbox), colname] = name
+    if select == "first_match":
+        for name, bbox in extents.items():
+            gdf.loc[gdf.within(bbox), colname] = name
+
+    elif select == "all_matches":
+        for name, bbox in extents.items():
+            gdf[name] = gdf.intersects(bbox)
+
+        # Create a list of all the names where the row has a True
+        def get_matching_names(row):
+            return [name for name in extents.keys() if row[name] is True]
+
+        gdf[colname] = gdf.apply(get_matching_names, axis=1)
+
+        # Replace empty lists with NaN
+        gdf[colname] = gdf[colname].apply(lambda x: x if len(x) > 0 else np.nan)
+        gdf = gdf.drop(columns=list(extents.keys()))
 
     nan_links = gdf[colname].isna().sum()
     # gdf = gdf[gdf[colname].notna()]
@@ -347,7 +373,7 @@ def get_dataset_for_gdf(icpag, datasets, link, year=2013, id_var="link"):
     -------
     - current_ds: xarray.Dataset, dataset where the census tract is located
     """
-    current_ds_name = icpag.loc[icpag[id_var] == link, f"dataset_{year}"].values[0]
+    current_ds_name = icpag.loc[icpag[id_var] == link, f"dataset_{year}"].iloc[0]
 
     if pd.isna(current_ds_name):
         # No dataset for this census tract this year...

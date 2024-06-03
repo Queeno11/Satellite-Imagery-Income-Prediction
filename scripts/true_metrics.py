@@ -207,7 +207,7 @@ def get_gridded_predictions_for_grid(
         grid = restrict_grid_to_ICPAG_area(grid, icpag)
         grid = remove_sea_from_grid(grid)
         grid = build_dataset.assign_datasets_to_gdf(
-            grid, extents, year=year, verbose=False
+            grid, extents, year=year, select="all_matches", verbose=False
         )
         grid = grid.dropna(subset=[f"dataset_{year}"])
         grid = grid.set_crs(epsg=4326, allow_override=True)
