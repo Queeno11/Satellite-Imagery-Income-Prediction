@@ -204,6 +204,7 @@ def get_gridded_predictions_for_grid(
         return grid  # Polygon with amba bounds
 
     def procesa_grilla(grid, icpag, extents):
+        print("Procesando grilla")
         grid = restrict_grid_to_ICPAG_area(grid, icpag)
         grid = remove_sea_from_grid(grid)
         grid = build_dataset.assign_datasets_to_gdf(
@@ -232,43 +233,33 @@ def get_gridded_predictions_for_grid(
 
         # Get link, dataset and indicator value of the corresponding index
         id_point, raster_point = grid.loc[i, ["id", "point"]]
-
-        # Get data for selected point
-        radio_censal = icpag.loc[icpag.contains(raster_point)]
-        if radio_censal.empty:
-            # El radio censal no existe, es el medio del mar...
-            print(
-                f"Point {raster_point} (id: {id_point}) doesn't belong to any census tract..."
-            )
-            image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
-            return image
-
         raster_point = (raster_point.x, raster_point.y)
-        link_name = radio_censal["link"].values[0]
-
-        cell_dataset = build_dataset.get_dataset_for_gdf(
+        cell_datasets = build_dataset.get_dataset_for_gdf(
             grid, datasets, id_point, year=year, id_var="id"
         )
-        if cell_dataset is None:
+        if len(cell_datasets) == 0:
             print(
-                f"No dataset for point {raster_point} (id: {id_point}) in link {link_name}, moving to next image..."
+                f"No datasets for point {raster_point} (id: {id_point}), moving to next image..."
             )
             image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
             return image
 
         # Generate the image
-        image, _ = utils.stacked_image_from_census_tract(
-            dataset=cell_dataset,
+        image = utils.stacked_image_from_census_tract(
+            dataset=cell_datasets,
             polygon=None,
             point=raster_point,
             img_size=size,
             n_bands=n_bands,
             stacked_images=stacked_images,
+            bounds=False,
         )
         if image.shape != img_correct_shape:
-            print(
-                f"Could not retrieve a valid image for point {raster_point} (id: {id_point}) in link {link_name}, moving to next image..."
-            )
+            # print(
+            #     f"Could not retrieve a valid image for point {raster_point} (id: {id_point}), moving to next image..."
+            # )
+            if id_point == 769303:
+                print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
             image = np.zeros(shape=(resizing_size, resizing_size, total_bands))
             return image
 
@@ -279,13 +270,22 @@ def get_gridded_predictions_for_grid(
         return image
 
     # Open grid of polygons for the corresponding parameters:
-    if size < 128:  # Working with landsat
-        grid = gpd.read_parquet(rf"{path_datain}/Grillas/grid_size512_tiles1.parquet")
-    else:
+    if os.path.exists(rf"{path_dataout}/grid_datasets/grid_{year}_proc.parquet"):
         grid = gpd.read_parquet(
-            rf"{path_datain}/Grillas/grid_size{size}_tiles1.parquet"
+            rf"{path_dataout}/grid_datasets/grid_{year}_proc.parquet"
         )
-    grid = procesa_grilla(grid, icpag, extents)
+        # grid = grid.cx[-58.58:-58.52, -34.49:-34.52].reset_index()
+    else:
+        if size < 128:  # Working with landsat
+            grid = gpd.read_parquet(
+                rf"{path_datain}/Grillas/grid_size512_tiles1.parquet"
+            )
+        else:
+            grid = gpd.read_parquet(
+                rf"{path_datain}/Grillas/grid_size{size}_tiles1.parquet"
+            )
+        grid = procesa_grilla(grid, icpag, extents)
+        grid.to_parquet(rf"{path_dataout}/grid_datasets/grid_{year}_proc.parquet")
 
     ### TF Datasets
     print("SE VAN A GENERAR:", grid.shape[0], "IMAGENES")

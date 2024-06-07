@@ -196,13 +196,6 @@ def generate_grid(
     year_datasets = all_years_datasets[year]
     year_extents = all_years_extents[year]
 
-    # year_datasets = build_dataset.add_datasets_combinations(year_datasets)
-    # year_extents = {
-    #     name: utils.get_dataset_extent(ds, image_size)
-    #     for name, ds in year_datasets.items()
-    # }
-    # gc.collect()
-
     # Cargo datasets
     icpag = build_dataset.load_icpag_dataset(trim=False)
     hist_df = pd.read_csv(

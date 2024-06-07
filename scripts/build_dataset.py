@@ -53,9 +53,16 @@ def load_satellite_datasets(year=2013, stretch=False):
     assert all([os.path.isfile(rf"{path_satelites}/{year}/{f}") for f in files])
 
     datasets = {
-        f.replace(".tif", ""): (xr.open_dataset(rf"{path_satelites}/{year}/{f}"))
+        f.replace(".tif", ""): (filter_black_pixels(xr.open_dataset(rf"{path_satelites}/{year}/{f}")))
         for f in files
     }
+    
+    
+    # Round x and y to 6 decimals
+    for name, dataset in datasets.items():
+        dataset["x"] = dataset["x"].round(6)
+        dataset["y"] = dataset["y"].round(6)
+
     if stretch:
         datasets = {name: stretch_dataset(ds) for name, ds in datasets.items()}
 
@@ -181,7 +188,13 @@ def load_icpag_dataset(variable="ln_pred_inc_mean", trim=True):
 
 
 def assign_datasets_to_gdf(
-    gdf, extents, year=2013, centroid=False, select="first_match", verbose=True
+    gdf,
+    extents,
+    year=2013,
+    centroid=False,
+    buffer=True,
+    select="first_match",
+    verbose=True,
 ):
     """Assign each geometry a dataset if the census tract falls within the extent of the dataset (images)
 
@@ -194,6 +207,17 @@ def assign_datasets_to_gdf(
     select: str, method to select the dataset. Options are "first_match" or "all_matches"
     """
     import warnings
+    def get_matching_names(row):
+        # Create a list of all the names where the row has a True
+        return [name for name in extents.keys() if row[name] is True]
+
+    def keep_only_one_capture(file_list):
+        # Extract the identifier from the first element
+        if len(file_list)>0:
+            capture_id = file_list[0].split("_")[1]
+            # Filter the list to keep only the values that match the identifier
+            file_list = [f for f in file_list if capture_id in f]
+        return file_list
 
     warnings.filterwarnings("ignore")
 
@@ -207,18 +231,23 @@ def assign_datasets_to_gdf(
 
     if select == "first_match":
         for name, bbox in extents.items():
-            gdf.loc[gdf.within(bbox), colname] = name
+            if buffer:
+                gdf.loc[gdf.buffer(0.004).within(bbox), colname] = name
+            else:
+                gdf.loc[gdf.within(bbox), colname] = name
 
     elif select == "all_matches":
         for name, bbox in extents.items():
-            gdf[name] = gdf.intersects(bbox)
+            print(name)
+            if buffer:
+                gdf[name] = gdf.buffer(0.004).intersects(bbox)
+            else:
+                gdf[name] = gdf.intersects(bbox)
+    
 
-        # Create a list of all the names where the row has a True
-        def get_matching_names(row):
-            return [name for name in extents.keys() if row[name] is True]
 
         gdf[colname] = gdf.apply(get_matching_names, axis=1)
-
+        # gdf[colname] = gdf[colname].apply(keep_only_one_capture)
         # Replace empty lists with NaN
         gdf[colname] = gdf[colname].apply(lambda x: x if len(x) > 0 else np.nan)
         gdf = gdf.drop(columns=list(extents.keys()))
@@ -373,14 +402,16 @@ def get_dataset_for_gdf(icpag, datasets, link, year=2013, id_var="link"):
     -------
     - current_ds: xarray.Dataset, dataset where the census tract is located
     """
-    current_ds_name = icpag.loc[icpag[id_var] == link, f"dataset_{year}"].iloc[0]
+    current_ds_name = icpag.loc[icpag[id_var] == link, f"dataset_{year}"].squeeze()
 
-    if pd.isna(current_ds_name):
-        # No dataset for this census tract this year...
-        current_ds = None
-        return current_ds
-
-    current_ds = datasets[current_ds_name]
+    if hasattr(current_ds_name, "__iter__"):
+        current_ds = [datasets[ds_name] for ds_name in current_ds_name]
+    else:
+        if pd.isna(current_ds_name):
+            # No dataset for this census tract this year...
+            current_ds = None
+            return current_ds
+        current_ds = datasets[current_ds_name]
     return current_ds
 
 
@@ -898,3 +929,25 @@ def generate_matrix_of_files(files):
         if len(cols_files) > 0:
             matrix += [cols_files]
     return matrix
+
+def generate_matrix_of_datasets(datasets):
+    """Create a matrix of datasets to be merged by xr.combine_nested.
+
+    Files are ordered as the original tiles, where R1C3 is the first tile of the third column.
+    Run xr.open_mfdataset(matrix, combine="nested", concat_dim=["x", "y"], engine="rasterio") after this.
+
+    Parameters:
+    files (list): List of files to be loaded
+
+    Returns:
+    matrix (list): List of lists of files to be loaded by xr.open_mfdataset
+    """
+    datasets = sorted(datasets, key=lambda element: sorted(element.encoding["source"]))
+    print([ds.encoding["source"] for ds in datasets])
+    matrix = []
+    for row in range(1, 10):
+        rows_ds = [ds for ds in datasets if f"_R{row}C" in ds.encoding["source"]]
+        if len(rows_ds) > 0:
+            matrix += [rows_ds]
+    return matrix
+

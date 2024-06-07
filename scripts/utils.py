@@ -6,6 +6,7 @@ import xarray as xr
 import skimage
 from skimage import color
 from shapely import Point
+import build_dataset
 
 
 def get_dataset_extent(ds, image_size=None):
@@ -88,21 +89,25 @@ def find_nearest_raster(x_array, y_array, x_value, y_value, max_bias=0):
 
 
 def point_column_to_x_y(df):
-    df.point = df.point.str.replace("\(|\)", "", regex=True).str.split(",")
+    df.point = df.point.str.replace(r"\(|\)", "", regex=True).str.split(",")
     df["x"] = df.point.str[0]
     df["y"] = df.point.str[1]
     return df[["x", "y"]]
 
 
-def image_from_point(dataset, point, img_size=128):
-
+def find_index_of_point_in_dataset(dataset, point):
     # Find the rearest raster of this random point
     x, y = point
     idx_x = np.searchsorted(dataset.x, x, side="left", sorter=None)
     idx_y = np.searchsorted(
         -dataset.y, -y, side="left", sorter=None
     )  # The y array is inverted! https://stackoverflow.com/questions/43095739/numpy-searchsorted-descending-order
+    return idx_x, idx_y
 
+
+def filter_datasets_by_idx_and_buffer(
+    dataset, idx_x, idx_y, img_size, validate_size=True
+):
     # Create the indexes of the box of the image
     idx_x_min = round(idx_x - img_size / 2)
     idx_x_max = round(idx_x + img_size / 2)
@@ -110,16 +115,36 @@ def image_from_point(dataset, point, img_size=128):
     idx_y_max = round(idx_y + img_size / 2)
 
     # If any of the indexes are negative, move to the next iteration
-    if (
-        (idx_x_min < 0)
-        | (idx_x_max > dataset.x.size)
-        | (idx_y_min < 0)
-        | (idx_y_max > dataset.y.size)
-    ):
-        image = np.zeros(shape=(1, 1, 1))
-        return image
+    if validate_size:
+        if (
+            (idx_x_min < 0)
+            | (idx_x_max > dataset.x.size)
+            | (idx_y_min < 0)
+            | (idx_y_max > dataset.y.size)
+        ):
+            return None
+    else:
+        if idx_x_min < 0:
+            idx_x_min = 0
+        if idx_y_min < 0:
+            idx_y_min = 0
 
-    image = dataset.isel(x=slice(idx_x_min, idx_x_max), y=slice(idx_y_min, idx_y_max))
+    filtered = dataset.isel(
+        x=slice(idx_x_min, idx_x_max), y=slice(idx_y_min, idx_y_max)
+    )
+
+    return filtered
+
+
+def image_from_point(dataset, point, img_size=128):
+
+    # Find the rearest raster of this random point
+    idx_x, idx_y = find_index_of_point_in_dataset(dataset, point)
+
+    image = filter_datasets_by_idx_and_buffer(dataset, idx_x, idx_y, img_size)
+
+    if image is None:
+        return np.zeros(shape=(1, 1, 1))
 
     image = image.band_data
 
@@ -130,40 +155,81 @@ def image_from_point(dataset, point, img_size=128):
     return image
 
 
-def image_from_point_dss(datasets, point, img_size=128):
+def dataset_for_image_at_bound(datasets, point, img_size=512):
 
-    raster_size_x = (datasets[0].x[1] - datasets[0].x[0]).values
-    raster_size_y = (datasets[0].y[1] - datasets[0].y[0]).values
-    images = []
-    for dataset in datasets:
-        image = dataset.sel(
-            x=slice(
-                point[0] - raster_size_x * (img_size - 1) / 2,
-                point[0] + raster_size_x * img_size / 2,
-            ),
-            y=slice(
-                point[1] - raster_size_y * (img_size - 1) / 2,
-                point[1] + raster_size_y * img_size / 2,
-            ),
+    minumum_valid_shape = (1, img_size, img_size)
+
+    if img_size > 512:
+        print(
+            "Warning. The image size is bigger than 512. The buffer of dataset_for_image_at_bound() should be changed..."
         )
-        if 0 in image.band_data.shape:
-            # Datasets doesn't contain image
+    # Lista de los capture_ids
+    ids = [f.encoding["source"].split("\\")[-1].split("_")[1] for f in datasets]
+    ids = list(set(ids))
+
+    # Itero por lista de capture_ids
+    for capture_id in ids:
+        # print(capture_id)
+        composition = []
+        datasets_id = [d for d in datasets if capture_id in d.encoding["source"]]
+        # Selecciona y filtra datasets que tienen el punto
+        for dataset in datasets_id:
+
+            # Find the rearest raster of this random point
+            idx_x, idx_y = find_index_of_point_in_dataset(dataset, point)
+            # print(idx_x, idx_y)
+            filtered_ds = filter_datasets_by_idx_and_buffer(
+                dataset, idx_x, idx_y, img_size, validate_size=False
+            )
+            # print(filtered_ds.band_data.shape)
+            if (filtered_ds is None) or (0 in filtered_ds.band_data.shape):
+                continue
+
+            composition += [filtered_ds]
+
+        # Build composed_dataset
+        if len(composition) == 1:
+            # Select dataset
+            current_shape = composition[0].band_data.shape
+            # Validate size
+            minumum_valid_shape = (1, img_size, img_size)
+            has_valid_shape = all(
+                [(a >= b) for a, b in zip(current_shape, minumum_valid_shape)]
+            )
+            if has_valid_shape:
+                composed_dataset = composition[0]
+                return composed_dataset
+            else:
+                continue
+
+        # Return an image if possible
+        elif len(composition) > 1:
+            # Select dataset
+            try:
+                composed_dataset = xr.combine_by_coords(
+                    composition, combine_attrs="override"
+                )
+
+            except Exception as e:
+                # print(e)
+                composition = build_dataset.generate_matrix_of_datasets(composition)
+                composed_dataset = xr.combine_nested(
+                    composition, combine_attrs="override", concat_dim=["y", "x"]
+                )
+            # Validate size
+            current_shape = composed_dataset.band_data.shape
+            has_valid_shape = all(
+                [(a >= b) for a, b in zip(current_shape, minumum_valid_shape)]
+            )
+            if has_valid_shape:
+                # Sort so it matches the original format
+                composed_dataset = composed_dataset.sortby("y", ascending=False)
+                composed_dataset = composed_dataset.sortby("x", ascending=True)
+                return composed_dataset
+            else:
+                continue
+        else:
             continue
-        images += [image.band_data]
-
-    image = xr.combine_by_coords(images, combine_attrs="override")
-
-    # If any of the indexes are negative, move to the next iteration
-    if image.x.size < img_size | image.y.size < img_size:
-        image = np.zeros(shape=(1, 1, 1))
-        print("Error en imagen")
-        return image
-
-    # if image.chunks is not None:
-    #     # If the image is not computed, compute it
-    #     image = image.compute()
-
-    return image
 
 
 def get_image_bounds(image_ds):
@@ -191,7 +257,13 @@ def assert_image_is_valid(image_dataset, n_bands, size):
 
 
 def stacked_image_from_census_tract(
-    dataset, polygon, point=None, img_size=100, n_bands=4, stacked_images=[1, 3]
+    dataset,
+    polygon,
+    point=None,
+    img_size=100,
+    n_bands=4,
+    stacked_images=[1, 3],
+    bounds=True,
 ):
 
     images_to_stack = []
@@ -203,27 +275,39 @@ def stacked_image_from_census_tract(
         # point = polygon.centroid.x, polygon.centroid.y
 
     for size_multiplier in stacked_images:
-        image_size = img_size * size_multiplier
-        image_da = image_from_point(dataset, point, image_size)
-
         try:
+            image_size = img_size * size_multiplier
+            if type(dataset) == list:
+                if len(dataset) > 1:
+                    image_ds = dataset_for_image_at_bound(dataset, point, image_size)
+                else:
+                    image_ds = dataset[0]
+            else:
+                image_ds = dataset
+
+            image_da = image_from_point(image_ds, point, image_size)
             image = image_da.to_numpy()[:n_bands, ::size_multiplier, ::size_multiplier]
-            # print(image)
+            assert image.shape == (n_bands, img_size, img_size)
+
             image = np.nan_to_num(image)
             image = image.astype(np.uint8)
             images_to_stack += [image]
+
         except Exception as e:
             # print(e)
             image = np.zeros(shape=(n_bands, 1, 1))
-            bounds = None
-            return image, bounds
+            if bounds:
+                return image, bounds
+            return image
 
     # Get total bounds
-    bounds = get_image_bounds(image_da)  # The last image has to be the bigger
     image = np.concatenate(images_to_stack, axis=0)  # Concat over bands
     assert image.shape == (total_bands, img_size, img_size)
+    if bounds:
+        bounds = get_image_bounds(image_da)  # The last image has to be the bigger
+        return image, bounds
 
-    return image, bounds
+    return image
 
 
 def random_image_from_census_tract(dataset, polygon, image_size):
