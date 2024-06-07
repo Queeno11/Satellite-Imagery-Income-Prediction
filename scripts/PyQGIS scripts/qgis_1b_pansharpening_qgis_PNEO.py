@@ -9,7 +9,7 @@ path = r"E:\2022 imagenes"
 output_folder = r"D:\Maestría\Tesis\Repo\data\data_in\Pansharpened"
 files = os.listdir(path)
 imgs = [
-    "IMG_PNEO4_202211031357396_MS-FS",
+    "IMG_PNEO4_202212051412329_MS-FS",
 ]
 ms_files = [f for f in files if f.endswith(".TIF") and any(img in f for img in imgs)]
 multispectral = [os.path.join(path, f) for f in ms_files]

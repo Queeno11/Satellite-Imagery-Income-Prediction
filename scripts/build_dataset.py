@@ -53,13 +53,63 @@ def load_satellite_datasets(year=2013, stretch=False):
     assert all([os.path.isfile(rf"{path_satelites}/{year}/{f}") for f in files])
 
     datasets = {
-        f.replace(".tif", ""): (xr.open_dataset(rf"{path_satelites}/{year}/{f}"))
+        f.replace(".tif", ""): (filter_black_pixels(xr.open_dataset(rf"{path_satelites}/{year}/{f}")))
         for f in files
     }
+    
+    
+    # Round x and y to 6 decimals
+    for name, dataset in datasets.items():
+        dataset["x"] = dataset["x"].round(6)
+        dataset["y"] = dataset["y"].round(6)
+
     if stretch:
         datasets = {name: stretch_dataset(ds) for name, ds in datasets.items()}
 
     extents = {name: utils.get_dataset_extent(ds) for name, ds in datasets.items()}
+
+    return datasets, extents
+
+
+def load_satellite_mfdatasets(year=2013, stretch=False):
+    """Load satellite datasets and get their extents"""
+    print(rf"{path_satelites}/{year}")
+    import warnings
+
+    warnings.simplefilter("ignore")
+
+    if not os.path.isdir(rf"{path_satelites}/{year}"):
+        raise ValueError(f"Year {year} images not found. Check they are stored in WSL!")
+
+    files = os.listdir(rf"{path_satelites}/{year}")
+    files = [f for f in files if f.endswith(".tif")]
+    capture_ids = set([f.split("_")[1] for f in files])
+
+    assert all([os.path.isfile(rf"{path_satelites}/{year}/{f}") for f in files])
+
+    files_by_id = {}
+    datasets = {}
+    for capture_id in capture_ids:
+        # for capture_id, files in files_by_id.items():
+        id_files = [rf"{path_satelites}/{year}/{f}" for f in files if capture_id in f]
+        id_files_matrix = generate_matrix_of_files(id_files)
+        ds = xr.open_mfdataset(
+            id_files_matrix,
+            combine="nested",
+            concat_dim=["x", "y"],
+            engine="rasterio",
+            chunks={"x": 1000, "y": 1000},
+        )
+
+        if stretch:
+            print(
+                "Warning: Stretching dataset might not be compatible with new loading method..."
+            )
+            ds = stretch_dataset(ds)
+
+        datasets[capture_id] = ds
+
+    extents = {name: utils.get_dataset_extent(ds, 512) for name, ds in datasets.items()}
 
     return datasets, extents
 
@@ -137,9 +187,37 @@ def load_icpag_dataset(variable="ln_pred_inc_mean", trim=True):
     return icpag
 
 
-def assign_datasets_to_gdf(gdf, extents, year=2013, centroid=False, verbose=True):
-    """Assign each geometry a dataset if the census tract falls within the extent of the dataset (images)"""
+def assign_datasets_to_gdf(
+    gdf,
+    extents,
+    year=2013,
+    centroid=False,
+    buffer=True,
+    select="first_match",
+    verbose=True,
+):
+    """Assign each geometry a dataset if the census tract falls within the extent of the dataset (images)
+
+    Parameters:
+    -----------
+    gdf: geopandas.GeoDataFrame, shapefile with the census tracts
+    extents: dict, dictionary with the extents of the satellite datasets
+    year: int, year of the satellite images
+    centroid: bool, if True, the centroid of the census tract is used to assign the dataset
+    select: str, method to select the dataset. Options are "first_match" or "all_matches"
+    """
     import warnings
+    def get_matching_names(row):
+        # Create a list of all the names where the row has a True
+        return [name for name in extents.keys() if row[name] is True]
+
+    def keep_only_one_capture(file_list):
+        # Extract the identifier from the first element
+        if len(file_list)>0:
+            capture_id = file_list[0].split("_")[1]
+            # Filter the list to keep only the values that match the identifier
+            file_list = [f for f in file_list if capture_id in f]
+        return file_list
 
     warnings.filterwarnings("ignore")
 
@@ -151,8 +229,28 @@ def assign_datasets_to_gdf(gdf, extents, year=2013, centroid=False, verbose=True
     else:
         colname = f"dataset_{year}"
 
-    for name, bbox in extents.items():
-        gdf.loc[gdf.within(bbox), colname] = name
+    if select == "first_match":
+        for name, bbox in extents.items():
+            if buffer:
+                gdf.loc[gdf.buffer(0.004).within(bbox), colname] = name
+            else:
+                gdf.loc[gdf.within(bbox), colname] = name
+
+    elif select == "all_matches":
+        for name, bbox in extents.items():
+            print(name)
+            if buffer:
+                gdf[name] = gdf.buffer(0.004).intersects(bbox)
+            else:
+                gdf[name] = gdf.intersects(bbox)
+    
+
+
+        gdf[colname] = gdf.apply(get_matching_names, axis=1)
+        # gdf[colname] = gdf[colname].apply(keep_only_one_capture)
+        # Replace empty lists with NaN
+        gdf[colname] = gdf[colname].apply(lambda x: x if len(x) > 0 else np.nan)
+        gdf = gdf.drop(columns=list(extents.keys()))
 
     nan_links = gdf[colname].isna().sum()
     # gdf = gdf[gdf[colname].notna()]
@@ -304,14 +402,16 @@ def get_dataset_for_gdf(icpag, datasets, link, year=2013, id_var="link"):
     -------
     - current_ds: xarray.Dataset, dataset where the census tract is located
     """
-    current_ds_name = icpag.loc[icpag[id_var] == link, f"dataset_{year}"].values[0]
+    current_ds_name = icpag.loc[icpag[id_var] == link, f"dataset_{year}"].squeeze()
 
-    if pd.isna(current_ds_name):
-        # No dataset for this census tract this year...
-        current_ds = None
-        return current_ds
-
-    current_ds = datasets[current_ds_name]
+    if hasattr(current_ds_name, "__iter__"):
+        current_ds = [datasets[ds_name] for ds_name in current_ds_name]
+    else:
+        if pd.isna(current_ds_name):
+            # No dataset for this census tract this year...
+            current_ds = None
+            return current_ds
+        current_ds = datasets[current_ds_name]
     return current_ds
 
 
@@ -772,3 +872,82 @@ def add_datasets_combinations(datasets):
     all_datasets = combinations | datasets
 
     return all_datasets
+
+
+def filter_black_pixels_over_dim(ds, dim="x"):
+    if dim == "x":
+        other_dim = "y"
+    elif dim == "y":
+        other_dim = "x"
+    else:
+        raise ValueError("dim must be 'x' or 'y'")
+
+    # Selecciono la mitad de la imagen
+    center = int(ds[dim].size / 2)
+    edge_data = ds.isel({dim: center})
+
+    # Busco los pixeles con al menos 50 pixeles sin datos
+    has_black_pixels = (edge_data["band_data"] == 0).all(dim="band")
+    has_black_pixels_in_row = has_black_pixels.rolling({other_dim: 50}).sum()
+    valid_data = (has_black_pixels_in_row == 0) | (has_black_pixels_in_row.isnull())
+
+    # Filtro los datos
+    first_valid = valid_data.to_numpy().tolist().index(True)
+    last_valid = -valid_data.to_numpy().tolist()[::-1].index(True)
+
+    if first_valid == 0:
+        first_valid = None
+    if last_valid == 0:
+        last_valid = None
+
+    return ds.isel({other_dim: slice(first_valid, last_valid)})
+
+
+def filter_black_pixels(ds):
+    y_filtered = filter_black_pixels_over_dim(ds, "y")
+    filtered = filter_black_pixels_over_dim(y_filtered, "x")
+    return filtered
+
+
+def generate_matrix_of_files(files):
+    """Create a matrix of files to be loaded by xr.open_mfdataset.
+
+    Files are ordered as the original tiles, where R1C3 is the first tile of the third column.
+    Run xr.open_mfdataset(matrix, combine="nested", concat_dim=["x", "y"], engine="rasterio") after this.
+
+    Parameters:
+    files (list): List of files to be loaded
+
+    Returns:
+    matrix (list): List of lists of files to be loaded by xr.open_mfdataset
+    """
+    files.sort()
+
+    matrix = []
+    for col in range(1, 5):
+        cols_files = [f for f in files if f"C{col}.tif" in f]
+        if len(cols_files) > 0:
+            matrix += [cols_files]
+    return matrix
+
+def generate_matrix_of_datasets(datasets):
+    """Create a matrix of datasets to be merged by xr.combine_nested.
+
+    Files are ordered as the original tiles, where R1C3 is the first tile of the third column.
+    Run xr.open_mfdataset(matrix, combine="nested", concat_dim=["x", "y"], engine="rasterio") after this.
+
+    Parameters:
+    files (list): List of files to be loaded
+
+    Returns:
+    matrix (list): List of lists of files to be loaded by xr.open_mfdataset
+    """
+    datasets = sorted(datasets, key=lambda element: sorted(element.encoding["source"]))
+    print([ds.encoding["source"] for ds in datasets])
+    matrix = []
+    for row in range(1, 10):
+        rows_ds = [ds for ds in datasets if f"_R{row}C" in ds.encoding["source"]]
+        if len(rows_ds) > 0:
+            matrix += [rows_ds]
+    return matrix
+
