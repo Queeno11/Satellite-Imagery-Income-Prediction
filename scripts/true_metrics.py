@@ -390,7 +390,7 @@ def compute_custom_loss_all_epochs(
         )
         df = df_not_test.sample(frac=0.066667, random_state=200)
         df = df.reset_index()
-        df.to_csv(rf"{path_dataout}/val_datasets/{savename}_val_dataframe.feather")
+        df.to_feather(rf"{path_dataout}/val_datasets/{savename}_val_dataframe.feather")
     print("Data loaded!")
 
     # dir of the images

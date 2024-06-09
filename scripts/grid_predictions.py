@@ -290,13 +290,15 @@ def plot_example(grid_preds, bbox, modelname, datasets, extents, img_savename):
 
 
 def plot_time_evolution(
-    grid_preds_2013,
-    grid_preds_2018,
-    grid_preds_2022,
+    grid_preds_pre,
+    grid_preds_post,
+    extents_pre,
+    extents_post,
+    año_pre,
+    año_post,
     bbox,
     modelname,
     datasets,
-    extents,
     img_savename,
 ):
 
@@ -304,53 +306,53 @@ def plot_time_evolution(
     poly = to_square(Polygon(bbox))
 
     # Carga datasets a memoria
-    ds_names = utils.get_datasets_for_polygon(poly, extents)
+    ds_names_pre = utils.get_datasets_for_polygon(poly, extents_pre)
+    ds_names_post = utils.get_datasets_for_polygon(poly, extents_post)
 
+    # Extraingo los bins
     icpag = build_dataset.load_icpag_dataset(variable="ln_pred_inc_mean", trim=False)
+    icpag["plot_var"], bins = pd.qcut(icpag["var"], 10, retbins=True, labels=False)
 
-    # Group predictions by census tract:
-    by_link = grid_preds.groupby("link").agg({"prediction": "mean"}).reset_index()
-    icpag = icpag.merge(by_link, on="link", how="outer")
+    fig, axs = plt.subplots(2, 2, figsize=(10, 10))
 
-    fig, axs = plt.subplots(2, 1, figsize=(5, 10))
     # Imagen satelital
-    for ds_name in ds_names:
-        ds = datasets[ds_name]
-        ds_plot_example(ds, poly, ax=axs[0])
-        ds_plot_example(ds, poly, ax=axs[1])
+    for ds_name in ds_names_pre:
+        ds = datasets[año_pre][ds_name]
+        ds_plot_example(ds, poly, ax=axs[0][0])  # Left top
+        ds_plot_example(ds, poly, ax=axs[0][1])  # Right top
+    for ds_name in ds_names_post:
+        ds = datasets[año_post][ds_name]
+        ds_plot_example(ds, poly, ax=axs[1][0])
+        ds_plot_example(ds, poly, ax=axs[1][1])
 
-    axs[0][0].set_title("Imagen satelital", fontsize=26)
+    axs[0][0].set_title(f"Imagen {año_pre}", fontsize=20)
+    axs[1][0].set_title(f"Imagen {año_post}", fontsize=20)
 
-    _, bins = pd.qcut(icpag["var"], 10, retbins=True, labels=False)
-
-    # Predicciones dif 2018
-
+    # Predicciones 2013
     gdf_plot_example(
-        grid_preds, var="prediction", poly=poly, ax=axs[0][1], bins=bins
+        grid_preds_pre, var="prediction", poly=poly, ax=axs[0][1], bins=bins
     )  # , vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
-    axs[0][1].set_title("Nuestra aproximación", fontsize=26)
 
-    # Predicciones dif 2022
+    # Predicciones 2018
     gdf_plot_example(
-        icpag, var="prediction", poly=poly, ax=axs[1][0], bins=bins
+        grid_preds_post, var="prediction", poly=poly, ax=axs[1][1], bins=bins
     )  # , vmin=icpag["ln_pred_inc_mean"].quantile(.1), vmax=icpag["ln_pred_inc_mean"].quantile(.9))
-    axs[1][0].set_title(
-        "Nuestra aproximación (media por Radio Censal)",
-        fontsize=26,
-    )
+
+    axs[0][1].set_title(f"Ingreso estimado {año_pre}", fontsize=20)
+    axs[1][1].set_title(f"Ingreso estimado {año_post}", fontsize=20)
 
     fig.tight_layout()
 
     savepath = f"{path_outputs}/{modelname}"
     os.makedirs(savepath, exist_ok=True)
     plt.savefig(
-        f"{path_outputs}/{modelname}/{modelname}_time_{img_savename}.png",
+        f"{path_outputs}/{modelname}/{modelname}_{img_savename}_evolution.png",
         bbox_inches="tight",
         dpi=300,
     )
     print(
         "Se creó la imagen: ",
-        f"{path_outputs}/{modelname}/{modelname}_time_{img_savename}.png",
+        f"{path_outputs}/{modelname}/{modelname}_{img_savename}.png",
     )
 
 
@@ -399,7 +401,7 @@ def plot_grid(grid_preds, modelname, year=2013):
 
 
 def plot_all_examples(
-    all_years_datasets, all_years_extents, grid_preds, savename, year
+    all_years_datasets, all_years_extents, grid_preds, grid_preds_pre, savename, year
 ):
     year_datasets = all_years_datasets[year]
     year_extents = all_years_extents[year]
@@ -412,9 +414,22 @@ def plot_all_examples(
         plot_example(
             grid_preds, bbox, savename, year_datasets, year_extents, f"{zona}_{year}"
         )
+        plot_time_evolution(
+            grid_preds_pre,
+            grid_preds,
+            all_years_extents[2013],
+            all_years_extents[year],
+            2013,
+            year,
+            bbox,
+            savename,
+            all_years_datasets,
+            f"{zona}_{year}",
+        )
 
 
 if __name__ == "__main__":
+    import run_model
 
     image_size = 128  # FIXME: VER SI ESTO FUNCIONA!!
     sample_size = 1
@@ -428,12 +443,19 @@ if __name__ == "__main__":
     path_repo = r"/mnt/d/Maestría/Tesis/Repo/"
     extra = "_aug"
     savename = f"{model_name}_size{image_size}_tiles{tiles}_sample{sample_size}{extra}"
+    savename = "effnet_v2S_lr0.0001_size128_y2013-2018-2022_stack1-4"
     year = 2018
 
-    for year in [2013, 2018]:
+    datasets, extents, df = run_model.open_datasets(
+        sat_data="pleiades", years=[2013, 2018, 2022]
+    )
+
+    for year in [2013, 2018, 2022]:
         # Generate gridded predictions
-        grid_preds, datasets, extents = generate_grid(
+        grid_preds = generate_grid(
             savename,
+            datasets,
+            extents,
             image_size,
             resizing_size,
             n_bands,
@@ -441,4 +463,7 @@ if __name__ == "__main__":
             year=year,
             generate=False,
         )
-        plot_all_examples(datasets, extents, grid_preds, savename, year)
+
+        if year == 2013:
+            grid_preds_pre = grid_preds
+        plot_all_examples(datasets, extents, grid_preds, grid_preds_pre, savename, year)
