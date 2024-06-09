@@ -861,7 +861,7 @@ def run(
     if generate_grid:
         print("Generando predicciones...")
         # Generate gridded predictions & plot examples
-        for year in [2022, 2018, 2013]:  # all_years_datasets.keys():
+        for year in [2013, 2018, 2022]:  # all_years_datasets.keys():
             grid_preds = grid_predictions.generate_grid(
                 savename,
                 all_years_datasets,
@@ -873,8 +873,10 @@ def run(
                 year=year,
                 generate=True,
             )
+            if year==2013:
+                grid_preds_2013 =  grid_preds
             grid_predictions.plot_all_examples(
-                all_years_datasets, all_years_extents, grid_preds, savename, year
+                all_years_datasets, all_years_extents, grid_preds, grid_preds_2013, savename, year
             )
 
 
