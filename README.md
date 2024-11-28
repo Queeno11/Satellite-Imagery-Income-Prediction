@@ -12,9 +12,14 @@ In this study, we examine the potential of using high-resolution satellite image
 
 - `scripts/`: All the scripts used are stored here. The main one is run_model.py, which uses functions from the other scripts. 
 - `scripts/PyQGIS scripts`: The satellite imagery is processed using the scripts stored here.
-- `scripts/notebooks`: We store several notebooks here that are useful for visualizing the models and the results. 
 - `README.md`: This file provides an overview and instructions for the repository.
 
+## Relevant Links
+
+
+- [Preprint Paper](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5026760) - Deep Learning with Satellite Images Enables High-Resolution Income Estimation: A Case Study of Buenos Aires. R&R at PLOS ONE.
+- [Visualize the income predictions!](https://ingresoamba.netlify.app) - In this link you can compare the satellite images of 2023 with the income predictions for 2013, 2018, and 2022.
+  
 ### License
 
 This project is licensed under the MIT License. See the LICENSE file for details.
