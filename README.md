@@ -19,6 +19,7 @@ In this study, we examine the potential of using high-resolution satellite image
 
 - [Preprint Paper](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5026760) - Deep Learning with Satellite Images Enables High-Resolution Income Estimation: A Case Study of Buenos Aires. R&R at PLOS ONE.
 - [Visualize the income predictions!](https://ingresoamba.netlify.app) - In this link you can compare the satellite images of 2023 with the income predictions for 2013, 2018, and 2022.
+- [Download the data](https://zenodo.org/records/13251268) - Predictions for AMBA region in geoparquet format and model weights at Zenodo repo.
   
 ### License
 
