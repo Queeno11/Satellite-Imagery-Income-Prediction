@@ -2,8 +2,6 @@
 !.gitignore
 !/scripts
 /scripts/_old
-/scripts/_old_main_scripts
-/scripts/notebooks
 /logs
 *.dbf
 *.cpg
